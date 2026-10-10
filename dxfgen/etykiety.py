@@ -53,13 +53,17 @@ def szerokosc_tekstu(tekst: str, wysokosc: float) -> float:
 
 
 def rozmiesc_etykiety(studnie, kat_fn, wysokosc: float,
-                      zajete: list[Prostokat] | None = None):
+                      zajete: list[Prostokat] | None = None,
+                      kierunek_fn=None):
     """
     Zwraca listę krotek (studnia, (x, y), kat, czy_leader) dla etykiet nazw.
 
-    studnie  : lista obiektów z .x, .y, .nazwa
-    kat_fn   : funkcja (idx) -> kąt trasy [stopnie]
-    zajete   : wstępnie zajęte prostokąty (np. kółka numerów) do omijania
+    studnie     : lista obiektów z .x, .y, .nazwa
+    kat_fn      : funkcja (idx) -> kąt trasy [stopnie]
+    zajete      : wstępnie zajęte prostokąty (numery, wymiary) do omijania
+    kierunek_fn : funkcja (idx) -> (ux, uy) jednostkowy wektor PREFEROWANEJ
+                  strony etykiety (np. przeciwnej do pomarańczowej linii).
+                  Gdy None — kierunek prostopadły do trasy.
     """
     rozmieszczone: list[Prostokat] = list(zajete or [])
     wynik = []
@@ -69,33 +73,35 @@ def rozmiesc_etykiety(studnie, kat_fn, wysokosc: float,
         w = szerokosc_tekstu(s.nazwa, wysokosc)
         h = wysokosc * 1.4
 
-        # kierunek prostopadły do trasy
-        rad = math.radians(kat)
-        nx, ny = -math.sin(rad), math.cos(rad)
+        if kierunek_fn is not None:
+            nx, ny = kierunek_fn(i)
+            kolejnosc = (1,)        # tylko preferowana strona
+        else:
+            rad = math.radians(kat)
+            nx, ny = -math.sin(rad), math.cos(rad)
+            kolejnosc = (1, -1)
 
         najlepsza = None
-        # próbuj: strona +, strona -, rosnące odsunięcie
-        for mult in (1, -1):
-            for krok in range(1, 9):
+        for mult in kolejnosc:
+            for krok in range(1, 10):
                 ods = 3.0 + krok * (h * 0.9)
                 cx = s.x + nx * ods * mult
                 cy = s.y + ny * ods * mult
                 p = Prostokat(cx, cy, w, h, kat)
                 if not any(_koliduja(p, q) for q in rozmieszczone):
-                    najlepsza = (p, ods, mult)
+                    najlepsza = (p, ods)
                     break
             if najlepsza:
                 break
 
         if najlepsza is None:
-            # ostateczność: daleko w górę
-            cx = s.x + nx * 12.0
-            cy = s.y + ny * 12.0
-            najlepsza = (Prostokat(cx, cy, w, h, kat), 12.0, 1)
+            cx = s.x + nx * 14.0
+            cy = s.y + ny * 14.0
+            najlepsza = (Prostokat(cx, cy, w, h, kat), 14.0)
 
-        p, ods, mult = najlepsza
+        p, ods = najlepsza
         rozmieszczone.append(p)
-        czy_leader = ods > 6.0  # jeśli odsunięte dalej — rysuj linię odniesienia
+        czy_leader = ods > 6.0  # odsunięte dalej -> linia odniesienia
         wynik.append((s, (p.cx, p.cy), kat, czy_leader))
 
     return wynik

@@ -252,13 +252,7 @@ def generuj_z_szablonu(
     # 3) narysuj nowe dane w model space
     proj.przelicz_numery_zapasow()
     msp = doc.modelspace()
-    dxf_model._rysuj_trase(msp, proj)
-    dxf_model._rysuj_studnie(msp, proj)
-    dxf_model._rysuj_odbite_linie(msp, proj)
-    dxf_model._rysuj_wymiary(msp, proj)
-    dxf_model._rysuj_numery(msp, proj)
-    dxf_model._rysuj_nazwy(msp, proj)
-    dxf_model._rysuj_zapasy_mufy(msp, proj)
+    dxf_model.rysuj_zawartosc(msp, proj)
 
     # 4) arkusze: klonuj wzorcowy layout dla każdego fragmentu trasy
     lista = podziel_na_arkusze(proj, zaklad_m=zaklad_m)

@@ -224,49 +224,32 @@ def _normalna(dx: float, dy: float) -> tuple[float, float]:
     return (-dy / d, dx / d)
 
 
-def _rysuj_numery(msp, proj: Projekt) -> None:
-    """Numer porządkowy w kółku, odsunięty prostopadle; tekst RÓWNOLEGLE do trasy."""
-    for i, s in enumerate(proj.studnie):
-        off = _wektor_normalny(proj, i, dystans=3.0)
-        cx, cy = s.x + off[0], s.y + off[1]
-        kat = _kat_trasy(proj, i)
-        msp.add_circle((cx, cy), NUMER_PROMIEN, dxfattribs={"layer": "_liczba"})
-        _tekst_z_maska(msp, str(s.nr), (cx, cy), NUMER_WYS, "_liczba", kat=kat)
-
-
-def _rysuj_nazwy(msp, proj: Projekt) -> None:
+def _strona_offsetu(proj: Projekt, idx: int) -> tuple[float, float]:
     """
-    Nazwy studni RÓWNOLEGLE do trasy, z maską tła i UNIKANIEM KOLIZJI.
-    Gdy etykieta musi być odsunięta — rysowany jest leader (linia odniesienia).
+    Jednostkowy wektor wskazujący stronę POMARAŃCZOWEJ linii offsetu
+    w studni idx (ta sama konwencja co _offset_polilinii: normalna +90°).
     """
-    from .etykiety import Prostokat, rozmiesc_etykiety
-
-    # obszary zajęte: kółka numerów (po przeciwnej stronie) + sama trasa (punkty studni)
-    zajete = []
-    for i, s in enumerate(proj.studnie):
-        off = _wektor_normalny(proj, i, dystans=3.0)
-        zajete.append(Prostokat(s.x + off[0], s.y + off[1],
-                                 NUMER_PROMIEN * 2, NUMER_PROMIEN * 2))
-        # punkt studni (znacznik) jako mała przeszkoda
-        zajete.append(Prostokat(s.x, s.y, STUDNIA_BOK, STUDNIA_BOK))
-
-    rozmieszczenie = rozmiesc_etykiety(
-        proj.studnie, lambda i: _kat_trasy(proj, i), NAZWA_WYS, zajete
-    )
-    for s, (tx, ty), kat, czy_leader in rozmieszczenie:
-        if czy_leader:
-            # linia odniesienia od studni do etykiety
-            msp.add_line((s.x, s.y), (tx, ty),
-                         dxfattribs={"layer": "Nazwa studni"})
-        _tekst_z_maska(msp, s.nazwa, (tx, ty), NAZWA_WYS, "Nazwa studni", kat=kat)
+    s = proj.studnie
+    if len(s) < 2:
+        return (0.0, 1.0)
+    if idx == 0:
+        dx, dy = s[1].x - s[0].x, s[1].y - s[0].y
+    elif idx == len(s) - 1:
+        dx, dy = s[-1].x - s[-2].x, s[-1].y - s[-2].y
+    else:
+        dx, dy = s[idx + 1].x - s[idx - 1].x, s[idx + 1].y - s[idx - 1].y
+    return _normalna(dx, dy)
 
 
-def _rysuj_wymiary(msp, proj: Projekt) -> None:
+def _rysuj_wymiary(msp, proj: Projekt) -> list:
     """
     Wymiar odcinka = długość z WT (wys. 1,5), RÓWNOLEGLE do odcinka, z maską tła.
     Pod wymiarem (równolegle) cyfra "1" = liczba kanałów.
+    Zwraca listę zajętych prostokątów (do unikania kolizji przez numery).
     """
+    from .etykiety import Prostokat, szerokosc_tekstu
     nazwa_do_idx = {s.nazwa: i for i, s in enumerate(proj.studnie)}
+    zajete = []
     for o in proj.odcinki:
         ia = nazwa_do_idx.get(o.studnia_a)
         ib = nazwa_do_idx.get(o.studnia_b)
@@ -278,18 +261,80 @@ def _rysuj_wymiary(msp, proj: Projekt) -> None:
         kat = math.degrees(math.atan2(b.y - a.y, b.x - a.x))
         if kat > 90 or kat < -90:
             kat += 180
-        # wektor "w dół" prostopadle do odcinka (dla cyfry liczby kanałów)
         rad = math.radians(kat)
-        nx, ny = math.sin(rad), -math.cos(rad)  # normalna
+        nx, ny = math.sin(rad), -math.cos(rad)  # normalna do odcinka
         odsun = WYMIAR_WYS * 1.4
-        # wymiar nad linią trasy
-        _tekst_z_maska(msp, _fmt(o.dlugosc_wt),
-                       (mx - nx * odsun, my - ny * odsun),
-                       WYMIAR_WYS, "wymiary", kat=kat)
-        # cyfra "1" (liczba kanałów) pod linią trasy, równolegle
-        _tekst_z_maska(msp, "1",
-                       (mx + nx * odsun, my + ny * odsun),
-                       KANALY_WYS, "_liczba kanałów", kat=kat)
+        tekst = _fmt(o.dlugosc_wt)
+        wx, wy = mx - nx * odsun, my - ny * odsun
+        _tekst_z_maska(msp, tekst, (wx, wy), WYMIAR_WYS, "wymiary", kat=kat)
+        # cyfra "1" (liczba kanałów) po drugiej stronie trasy
+        kx, ky = mx + nx * odsun, my + ny * odsun
+        _tekst_z_maska(msp, "1", (kx, ky), KANALY_WYS, "_liczba kanałów", kat=kat)
+        # zarejestruj bbox wymiaru i cyfry jako zajęte
+        zajete.append(Prostokat(wx, wy, szerokosc_tekstu(tekst, WYMIAR_WYS),
+                                WYMIAR_WYS * 1.4, kat))
+        zajete.append(Prostokat(kx, ky, szerokosc_tekstu("1", KANALY_WYS),
+                                KANALY_WYS * 1.4, kat))
+    return zajete
+
+
+def _rysuj_numery(msp, proj: Projekt, zajete_wymiary: list) -> list:
+    """
+    Numer porządkowy w kółku po STRONIE POMARAŃCZOWEJ linii, odsunięty tak,
+    by NIE zasłaniał wymiarów. Zwraca listę zajętych prostokątów (kółka).
+    """
+    from .etykiety import Prostokat, _koliduja
+    zajete = list(zajete_wymiary)
+    kolka = []
+    for i, s in enumerate(proj.studnie):
+        kat = _kat_trasy(proj, i)
+        sx, sy = _strona_offsetu(proj, i)  # strona pomarańczowej linii
+        # szukaj odsunięcia bez kolizji z wymiarami/innymi numerami
+        umieszczono = None
+        for krok in range(1, 7):
+            ods = 3.0 + krok * (NUMER_PROMIEN * 1.6)
+            cx, cy = s.x + sx * ods, s.y + sy * ods
+            p = Prostokat(cx, cy, NUMER_PROMIEN * 2, NUMER_PROMIEN * 2)
+            if not any(_koliduja(p, q) for q in zajete):
+                umieszczono = (cx, cy, p)
+                break
+        if umieszczono is None:
+            cx, cy = s.x + sx * 3.0, s.y + sy * 3.0
+            p = Prostokat(cx, cy, NUMER_PROMIEN * 2, NUMER_PROMIEN * 2)
+        else:
+            cx, cy, p = umieszczono
+        zajete.append(p)
+        kolka.append(p)
+        msp.add_circle((cx, cy), NUMER_PROMIEN, dxfattribs={"layer": "_liczba"})
+        _tekst_z_maska(msp, str(s.nr), (cx, cy), NUMER_WYS, "_liczba", kat=kat)
+    return kolka
+
+
+def _rysuj_nazwy(msp, proj: Projekt, zajete: list) -> None:
+    """
+    Nazwy studni RÓWNOLEGLE do trasy, PO STRONIE PRZECIWNEJ niż pomarańczowa
+    linia offsetu. Z maską tła, unikaniem kolizji i leaderami gdy trzeba.
+    """
+    from .etykiety import Prostokat, rozmiesc_etykiety
+
+    przeszkody = list(zajete)
+    for s in proj.studnie:
+        przeszkody.append(Prostokat(s.x, s.y, STUDNIA_BOK, STUDNIA_BOK))
+
+    # strona nazw = przeciwna do offsetu => preferuj znak ujemny normalnej
+    def strona(i):
+        sx, sy = _strona_offsetu(proj, i)
+        return (-sx, -sy)
+
+    rozmieszczenie = rozmiesc_etykiety(
+        proj.studnie, lambda i: _kat_trasy(proj, i), NAZWA_WYS,
+        przeszkody, kierunek_fn=strona,
+    )
+    for s, (tx, ty), kat, czy_leader in rozmieszczenie:
+        if czy_leader:
+            msp.add_line((s.x, s.y), (tx, ty),
+                         dxfattribs={"layer": "Nazwa studni"})
+        _tekst_z_maska(msp, s.nazwa, (tx, ty), NAZWA_WYS, "Nazwa studni", kat=kat)
 
 
 def _rysuj_zapasy_mufy(msp, proj: Projekt) -> None:
@@ -390,15 +435,23 @@ def zbuduj_dokument(proj: Projekt):
     _utworz_blok_studni(doc)
 
     msp = doc.modelspace()
+    rysuj_zawartosc(msp, proj)
+    return doc
+
+
+def rysuj_zawartosc(msp, proj: Projekt) -> None:
+    """
+    Rysuje całą zawartość model space w poprawnej kolejności, z unikaniem kolizji:
+    trasa -> studnie -> offset 15j -> wymiary -> numery (omijają wymiary)
+    -> nazwy (przeciwna strona offsetu) -> zapasy/mufy.
+    """
     _rysuj_trase(msp, proj)
     _rysuj_studnie(msp, proj)
     _rysuj_odbite_linie(msp, proj)
-    _rysuj_wymiary(msp, proj)
-    _rysuj_numery(msp, proj)
-    _rysuj_nazwy(msp, proj)
+    zajete_wym = _rysuj_wymiary(msp, proj)
+    kolka = _rysuj_numery(msp, proj, zajete_wym)
+    _rysuj_nazwy(msp, proj, zajete_wym + kolka)
     _rysuj_zapasy_mufy(msp, proj)
-
-    return doc
 
 
 def generuj_model_dxf(proj: Projekt, sciezka_wyjscia: str) -> str:
