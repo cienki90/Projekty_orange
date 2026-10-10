@@ -4,61 +4,49 @@ REM ============================================================
 REM  generuj.bat - uruchomienie generatora DXF
 REM
 REM  Uzycie:
-REM    generuj.bat                         (domyslne pliki + wynik.dxf)
+REM    generuj.bat                     (OKNO WYBORU plikow)
+REM    generuj.bat --auto              (auto-wykrycie, bez okna)
 REM    generuj.bat wspol.xlsx wt.xls out.dxf
 REM ============================================================
 setlocal
 cd /d "%~dp0"
 
-REM --- wykryj Python ---
+REM --- wykryj Python: najpierw launcher "py", potem "python" ---
 set "PY="
-where py >nul 2>nul && set "PY=py -3"
-if not defined PY (
-    where python >nul 2>nul && set "PY=python"
+py -3 --version >nul 2>nul
+if %errorlevel%==0 (
+    set "PY=py -3"
+    goto :have_py
 )
-if not defined PY (
-    echo [BLAD] Nie znaleziono Pythona. Najpierw uruchom setup.bat
-    pause
-    exit /b 1
+python --version >nul 2>nul
+if %errorlevel%==0 (
+    set "PY=python"
+    goto :have_py
 )
+echo [BLAD] Nie znaleziono Pythona. Najpierw uruchom setup.bat
+echo        (zainstaluj Python 3.10+ i zaznacz "Add Python to PATH")
+pause
+exit /b 1
 
-REM --- argumenty: domyslne nazwy plikow jesli brak ---
-set "WSPOL=%~1"
-set "WT=%~2"
-set "OUT=%~3"
-if "%WSPOL%"=="" set "WSPOL=współrzędne.xlsx"
-if "%WT%"==""    set "WT=wt.xls"
-if "%OUT%"==""   set "OUT=wynik.dxf"
-
+:have_py
+echo Uzywam interpretera: %PY%
 echo.
-echo === Generowanie DXF ===
-echo   Wspolrzedne : %WSPOL%
-echo   Warunki tech: %WT%
-echo   Wyjscie     : %OUT%
+echo === Generator DXF ===
+echo Otwieram okno wyboru plikow (lub uzywam podanych argumentow)...
 echo.
 
-if not exist "%WSPOL%" (
-    echo [BLAD] Brak pliku wspolrzednych: %WSPOL%
-    pause
-    exit /b 1
-)
-if not exist "%WT%" (
-    echo [BLAD] Brak pliku warunkow technicznych: %WT%
-    pause
-    exit /b 1
-)
-
-%PY% generuj.py "%WSPOL%" "%WT%" "%OUT%"
+REM przekazanie wszystkich argumentow do generatora
+%PY% generuj.py %*
 
 if errorlevel 1 (
     echo.
-    echo [BLAD] Generowanie nie powiodlo sie.
+    echo [INFO] Zakonczono (blad lub anulowano).
     pause
     exit /b 1
 )
 
 echo.
-echo === Gotowe. Plik: %OUT% ===
-echo Mozesz sprawdzic wynik: sprawdz.bat "%OUT%"
+echo === Gotowe ===
+echo Mozesz sprawdzic wynik: sprawdz.bat
 pause
 endlocal

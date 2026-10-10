@@ -30,9 +30,11 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
 Najprościej — dwuklik kolejno:
 
 1. **`setup.bat`** — jednorazowa instalacja zależności (wykrywa Pythona, instaluje pakiety).
-2. **`generuj.bat`** — generuje DXF. Bez argumentów używa domyślnych plików
-   `współrzędne.xlsx` + `wt.xls` i zapisuje `wynik.dxf`. Można podać własne:
+2. **`generuj.bat`** — generuje DXF. Bez argumentów otwiera **okno wyboru plików**
+   (wskazujesz współrzędne, WT i miejsce zapisu DXF; pola są wstępnie wypełniane
+   auto-wykrytymi plikami z katalogu). Można też pominąć okno:
    ```
+   generuj.bat --auto                               (auto-wykrycie, bez okna)
    generuj.bat moje_wspolrzedne.xlsx moje_wt.xls moj_wynik.dxf
    ```
 3. **`sprawdz.bat`** — waliduje wygenerowany DXF (wersja, audit, warstwy, arkusze,

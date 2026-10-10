@@ -4,25 +4,32 @@ REM ============================================================
 REM  setup.bat - instalacja zaleznosci generatora DXF
 REM ============================================================
 setlocal
+cd /d "%~dp0"
 
 echo.
 echo === Instalacja zaleznosci (Python) ===
 echo.
 
-REM --- wykryj Python ---
+REM --- wykryj Python: najpierw launcher "py", potem "python" ---
 set "PY="
-where py >nul 2>nul && set "PY=py -3"
-if not defined PY (
-    where python >nul 2>nul && set "PY=python"
+py -3 --version >nul 2>nul
+if %errorlevel%==0 (
+    set "PY=py -3"
+    goto :have_py
 )
-if not defined PY (
-    echo [BLAD] Nie znaleziono Pythona. Zainstaluj Python 3.10+ z https://www.python.org/downloads/
-    echo        Przy instalacji zaznacz "Add Python to PATH".
-    pause
-    exit /b 1
+python --version >nul 2>nul
+if %errorlevel%==0 (
+    set "PY=python"
+    goto :have_py
 )
+echo [BLAD] Nie znaleziono Pythona. Zainstaluj Python 3.10+ z:
+echo        https://www.python.org/downloads/
+echo        Przy instalacji zaznacz "Add Python to PATH".
+pause
+exit /b 1
 
-echo Uzywam: %PY%
+:have_py
+echo Uzywam interpretera: %PY%
 %PY% --version
 
 echo.
