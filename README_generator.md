@@ -25,7 +25,22 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
       zapasów/muf, podgląd, generowanie.
 - [ ] **Etap 5** — antykolizja opisów (przesuwanie + leadery).
 
-## Instalacja
+## Uruchamianie w Windows (pliki .bat)
+
+Najprościej — dwuklik kolejno:
+
+1. **`setup.bat`** — jednorazowa instalacja zależności (wykrywa Pythona, instaluje pakiety).
+2. **`generuj.bat`** — generuje DXF. Bez argumentów używa domyślnych plików
+   `współrzędne.xlsx` + `wt.xls` i zapisuje `wynik.dxf`. Można podać własne:
+   ```
+   generuj.bat moje_wspolrzedne.xlsx moje_wt.xls moj_wynik.dxf
+   ```
+3. **`sprawdz.bat`** — waliduje wygenerowany DXF (wersja, audit, warstwy, arkusze,
+   skala viewportów). Bez argumentu sprawdza `wynik.dxf`.
+
+> Wymagany Python 3.10+ (przy instalacji zaznacz „Add Python to PATH").
+
+## Instalacja (ręcznie / Linux / macOS)
 
 ```bash
 pip install -r requirements.txt
