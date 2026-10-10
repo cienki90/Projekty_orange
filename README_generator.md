@@ -25,6 +25,19 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
       zapasów/muf, podgląd, generowanie.
 - [ ] **Etap 5** — antykolizja opisów (przesuwanie + leadery).
 
+### Opisy zakończeń A/B (ramki)
+
+Ramki „Zakończenie A/B" są rysowane **od zera** (nie kopiowane ze wzorca):
+- prostokąt + tekst w środku + **strzałka wskazująca skrajną studnię** (A =
+  pierwsza, B = ostatnia), zgodnie z `opis zakonczenia a/b.png`;
+- rozmiar ramki jest **dynamicznie dopasowywany do tekstu** (realny pomiar
+  czcionką Arial + zapas), więc żadna linia — także prawy górny róg — nie
+  wychodzi poza obramowanie;
+- „Zakończenie A" pojawia się tylko na pierwszym arkuszu, „Zakończenie B" tylko
+  na ostatnim; na pozostałych arkuszach ramek nie ma;
+- przy czyszczeniu arkusza usuwane są wszystkie **śmieci** ze wzorca (puste
+  ramki, osierocone strzałki MULTILEADER, odklejone bloki opisu kabla).
+
 ## Uruchamianie w Windows (pliki .bat)
 
 Najprościej — dwuklik kolejno:
