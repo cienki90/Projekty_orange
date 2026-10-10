@@ -82,17 +82,16 @@ def _ustaw_rzutnie(layout, ark: Arkusz) -> None:
     glowny.dxf.view_center_point = (ark.center_x, ark.center_y, 0)
 
 
-def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz) -> None:
+def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz,
+                          jest_pierwszy: bool = True,
+                          jest_ostatni: bool = True) -> None:
     """
     Dynamicznie aktualizuje pola tabelki i ramek opisowych danymi z WT.
 
-    Rozpoznawanie pól po charakterystycznej treści MTEXT wzorca:
-      - operator + adres (Wykonawca/Inwestor),
-      - temat = adresy zakończeń A - B,
-      - projektant, nr uprawnień, data,
-      - nr kabla (WTROI/.../AA),
-      - ramki opisowe "Proj. kabel ... / dł. trasowa / dł. montażowa",
-      - "Zakończenie A/B: ... Studnia OPL ...".
+    Ramki zakończeń:
+      - "Zakończenie A" (początek trasy) tylko na PIERWSZYM arkuszu,
+      - "Zakończenie B" (koniec trasy) tylko na OSTATNIM arkuszu,
+      - na pozostałych arkuszach ramki zakończeń są usuwane.
     Zachowujemy formatowanie MTEXT (kody \\P, \\T, \\px...).
     """
     import re
@@ -101,8 +100,29 @@ def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz) -> None:
     dl_tras = _fmt_pl(proj.dlugosc_trasowa())
     dl_mont = _fmt_pl(proj.dlugosc_montazowa())
 
+    do_usuniecia = []
     for e in layout.query("MTEXT"):
         txt = e.text
+
+        # === NAJPIERW ramki zakończeń (zawierają adres, więc muszą być
+        #     sprawdzane PRZED polem "Temat") ===
+        if "Zakończenie A" in txt or "Zakonczenie A" in txt:
+            if jest_pierwszy:
+                e.text = _zbuduj_zakonczenie(txt, "A", d)
+            else:
+                do_usuniecia.append(e)
+            continue
+        if "Zakończenie B" in txt or "Zakonczenie B" in txt:
+            if jest_ostatni:
+                e.text = _zbuduj_zakonczenie(txt, "B", d)
+            else:
+                do_usuniecia.append(e)
+            continue
+
+        # --- ramka opisowa: Proj. kabel ... + długości ---
+        if "Proj." in txt and ("kabel" in txt or "XOTK" in txt.upper()):
+            e.text = _zbuduj_ramke_kabel(txt, d, dl_tras, dl_mont)
+            continue
 
         # --- nr rysunku (duży tekst "2.1") ---
         if re.fullmatch(r"\d+(\.\d+)*", txt.strip()) and e.dxf.char_height >= 3.5:
@@ -115,8 +135,9 @@ def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz) -> None:
                 e.text = _zbuduj_operator(txt, d)
             continue
 
-        # --- temat: adresy zakończeń ---
-        if "GÓRNOŚLĄSKA" in txt.upper() or "3-GO MAJA" in txt.upper() or "Ząbki, UL" in txt:
+        # --- pole TEMAT w tabelce: rozpoznane po kodzie "\pxi0,l1;" (dwuwierszowy
+        #     adres A - B w metryce), NIE mylić z ramkami zakończeń ---
+        if txt.startswith("\\pxi0,l1;") or ("GÓRNOŚLĄSKA" in txt.upper() and " - " in txt):
             if d.zakonczenie_a_adres or d.zakonczenie_b_adres:
                 e.text = _zbuduj_temat(txt, d)
             continue
@@ -145,18 +166,12 @@ def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz) -> None:
                 e.text = d.nr_kabla
             continue
 
-        # --- ramka opisowa: Proj. kabel ... + długości ---
-        if "Proj." in txt and ("kabel" in txt or "XOTK" in txt.upper()):
-            e.text = _zbuduj_ramke_kabel(txt, d, dl_tras, dl_mont)
-            continue
-
-        # --- ramka: Zakończenie A/B ---
-        if "Zakończenie A" in txt:
-            e.text = _zbuduj_zakonczenie(txt, "A", d)
-            continue
-        if "Zakończenie B" in txt:
-            e.text = _zbuduj_zakonczenie(txt, "B", d)
-            continue
+    # usuń ramki zakończeń nienależące do tego arkusza
+    for e in do_usuniecia:
+        try:
+            layout.delete_entity(e)
+        except Exception:
+            pass
 
 
 def _fmt_pl(v: float) -> str:
@@ -258,6 +273,10 @@ def generuj_z_szablonu(
     lista = podziel_na_arkusze(proj, zaklad_m=zaklad_m)
     nazwa_wzorca = _wybierz_layout_wzorzec(doc)
 
+    # zapamiętaj parametry wzorcowej ramki "Zakończenie B" (dane, nie encję —
+    # encja zostałaby osierocona po usunięciu swojego layoutu)
+    szablon_zak_b = _parametry_wzorcowej_ramki_b(doc)
+
     # usuń pozostałe wzorcowe arkusze (zostaw tylko jeden jako bazę do klonowania)
     bazowy = doc.layouts.get(nazwa_wzorca)
     for n in [x for x in doc.layouts.names() if x not in ("Model", nazwa_wzorca)]:
@@ -266,8 +285,10 @@ def generuj_z_szablonu(
         except Exception:
             pass
 
-    # pierwszy arkusz = bazowy (zmień nazwę), kolejne = kopie
+    n_ark = len(lista)
     for i, ark in enumerate(lista):
+        jest_pierwszy = (i == 0)
+        jest_ostatni = (i == n_ark - 1)
         if i == 0:
             layout = bazowy
             try:
@@ -276,38 +297,76 @@ def generuj_z_szablonu(
                 pass
         else:
             layout = _klonuj_layout(doc, bazowy, f"Arkusz {ark.numer}")
+
+        # na ostatnim arkuszu dołóż ramkę "Zakończenie B", jeśli jej brak w szablonie
+        if jest_ostatni and szablon_zak_b is not None:
+            ma_b = any("Zakończenie B" in e.text for e in layout.query("MTEXT"))
+            if not ma_b:
+                mt = layout.add_mtext(
+                    szablon_zak_b["text"],
+                    dxfattribs={"layer": szablon_zak_b["layer"],
+                                "style": szablon_zak_b.get("style", "Standard")},
+                )
+                mt.dxf.char_height = szablon_zak_b["h"]
+                mt.set_location(szablon_zak_b["insert"],
+                                attachment_point=szablon_zak_b["attach"])
+
         _ustaw_rzutnie(layout, ark)
-        _podmien_pole_tabelki(layout, proj, ark)
+        _podmien_pole_tabelki(layout, proj, ark, jest_pierwszy, jest_ostatni)
 
     doc.saveas(sciezka_wyjscia)
     return sciezka_wyjscia, len(lista)
 
 
+def _parametry_wzorcowej_ramki_b(doc):
+    """
+    Zwraca parametry (dane) wzorcowej ramki 'Zakończenie B' — treść, pozycję,
+    wysokość, warstwę, styl. Dane, bo sama encja zostanie usunięta z layoutem.
+    """
+    for n in doc.layouts.names():
+        if n == "Model":
+            continue
+        for e in doc.layouts.get(n).query("MTEXT"):
+            if "Zakończenie B" in e.text:
+                return {
+                    "text": e.text,
+                    "insert": (e.dxf.insert.x, e.dxf.insert.y),
+                    "h": e.dxf.char_height,
+                    "layer": e.dxf.layer,
+                    "style": getattr(e.dxf, "style", "Standard"),
+                    "attach": getattr(e.dxf, "attachment_point", 1),
+                }
+    return None
+
+
+# atrybuty plot settings do skopiowania 1:1 z layoutu bazowego
+_PLOT_ATRYBUTY = (
+    "plot_configuration_file", "paper_size", "plot_paper_units", "plot_rotation",
+    "plot_type", "paper_width", "paper_height", "plot_origin_x_offset",
+    "plot_origin_y_offset", "left_margin", "bottom_margin", "right_margin",
+    "top_margin", "scale_numerator", "scale_denominator", "standard_scale_type",
+    "plot_layout_flags", "unit_factor", "plot_view_name", "current_style_sheet",
+)
+
+
 def _klonuj_layout(doc, bazowy, nowa_nazwa: str):
     """
     Klonuje layout bazowy wraz z zawartością (tabelka, ramka, rzutnia)
-    ORAZ ustawieniami strony A3 (DWG To PDF, marginesy jak w wzorcu).
+    ORAZ dokładnymi ustawieniami wydruku skopiowanymi z bazowego
+    (ten sam profil 'DWG To PDF', rozmiar User69634, marginesy wzorca).
     """
     if nowa_nazwa in doc.layouts.names():
         doc.layouts.delete(nowa_nazwa)
     nowy = doc.layouts.new(nowa_nazwa)
 
-    # 1) ustaw stronę A3 jak w wzorcu (kluczowe — bez tego kopie mają zły format!)
-    try:
-        nowy.page_setup(
-            size=(420, 297),
-            margins=(20, 6, 6, 6),  # (top, right, bottom, left)
-            units="mm",
-            offset=(0, 0),
-            rotation=0,
-        )
-        nowy.dxf.plot_configuration_file = "DWG To PDF.pc3"
-    except Exception:
-        pass
-    try:
-        nowy.dxf.plot_layout_flags = bazowy.dxf.plot_layout_flags
-    except Exception:
-        pass
+    # 1) skopiuj WSZYSTKIE atrybuty plot settings wprost z bazowego layoutu
+    #    (kluczowe — bez tego kopie dostają generyczny profil ezdxf i "zły format")
+    for a in _PLOT_ATRYBUTY:
+        try:
+            val = getattr(bazowy.dxf, a)
+            setattr(nowy.dxf, a, val)
+        except Exception:
+            pass
 
     # 2) skopiuj encje paper space (tabelka, ramki, rzutnie, opisy)
     for e in bazowy:
