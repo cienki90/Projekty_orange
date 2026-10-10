@@ -84,17 +84,147 @@ def _ustaw_rzutnie(layout, ark: Arkusz) -> None:
 
 def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz) -> None:
     """
-    Podmienia w tabelce dynamiczne pola: nr rysunku i długości.
-    Reszta pól (inwestor, projektant itd.) zostaje jak we wzorcu —
-    chyba że dane z WT różnią się: wtedy aktualizujemy znane pola po treści.
+    Dynamicznie aktualizuje pola tabelki i ramek opisowych danymi z WT.
+
+    Rozpoznawanie pól po charakterystycznej treści MTEXT wzorca:
+      - operator + adres (Wykonawca/Inwestor),
+      - temat = adresy zakończeń A - B,
+      - projektant, nr uprawnień, data,
+      - nr kabla (WTROI/.../AA),
+      - ramki opisowe "Proj. kabel ... / dł. trasowa / dł. montażowa",
+      - "Zakończenie A/B: ... Studnia OPL ...".
+    Zachowujemy formatowanie MTEXT (kody \\P, \\T, \\px...).
     """
-    nr_rys = proj.dane.rys_nr or f"{ark.numer}"
+    import re
+    d = proj.dane
+    nr_rys = d.rys_nr or f"{ark.numer}"
+    dl_tras = _fmt_pl(proj.dlugosc_trasowa())
+    dl_mont = _fmt_pl(proj.dlugosc_montazowa())
+
     for e in layout.query("MTEXT"):
         txt = e.text
-        # nr kabla
-        if proj.dane.nr_kabla and "WTROI/" in txt and "/AA" in txt:
-            # zostaw — wzorzec zwykle ma poprawny; aktualizacja opcjonalna
-            pass
+
+        # --- nr rysunku (duży tekst "2.1") ---
+        if re.fullmatch(r"\d+(\.\d+)*", txt.strip()) and e.dxf.char_height >= 3.5:
+            e.text = nr_rys
+            continue
+
+        # --- operator / adres (Wykonawca, Inwestor) ---
+        if "Wawtel" in txt or "sp. z o" in txt.lower():
+            if d.operator:
+                e.text = _zbuduj_operator(txt, d)
+            continue
+
+        # --- temat: adresy zakończeń ---
+        if "GÓRNOŚLĄSKA" in txt.upper() or "3-GO MAJA" in txt.upper() or "Ząbki, UL" in txt:
+            if d.zakonczenie_a_adres or d.zakonczenie_b_adres:
+                e.text = _zbuduj_temat(txt, d)
+            continue
+
+        # --- projektant ---
+        if "Ostasiewicz" in txt or ("mgr" in txt.lower() and "inż" in txt.lower()):
+            if d.projektant:
+                e.text = d.projektant
+            continue
+
+        # --- nr uprawnień ---
+        if re.fullmatch(r"\s*\d+/\d+/\w+\s*", txt):
+            if d.nr_uprawnien:
+                e.text = d.nr_uprawnien
+            continue
+
+        # --- data ---
+        if "Data:" in txt:
+            if d.data_rys or d.data_wt:
+                e.text = f" Data: {d.data_rys or d.data_wt}"
+            continue
+
+        # --- nr kabla samodzielny (Wykonawca WTROI) ---
+        if re.fullmatch(r"\s*WTROI/\d+/\w+\s*", txt):
+            if d.nr_kabla:
+                e.text = d.nr_kabla
+            continue
+
+        # --- ramka opisowa: Proj. kabel ... + długości ---
+        if "Proj." in txt and ("kabel" in txt or "XOTK" in txt.upper()):
+            e.text = _zbuduj_ramke_kabel(txt, d, dl_tras, dl_mont)
+            continue
+
+        # --- ramka: Zakończenie A/B ---
+        if "Zakończenie A" in txt:
+            e.text = _zbuduj_zakonczenie(txt, "A", d)
+            continue
+        if "Zakończenie B" in txt:
+            e.text = _zbuduj_zakonczenie(txt, "B", d)
+            continue
+
+
+def _fmt_pl(v: float) -> str:
+    return f"{v:.1f}".replace(".", ",")
+
+
+def _zbuduj_operator(oryg: str, d) -> str:
+    """Odtwarza blok 'nazwa + adres' zachowując kod formatowania \\T jeśli był."""
+    pref = ""
+    if oryg.startswith("{\\T"):
+        pref = oryg[: oryg.find(";") + 1]  # np. {\T0.9;
+        suf = "}"
+    else:
+        suf = ""
+    linie = d.operator
+    if d.adres_operatora:
+        linie += "\\P" + d.adres_operatora
+    return f"{pref}{linie}{suf}"
+
+
+def _zbuduj_temat(oryg: str, d) -> str:
+    pref = ""
+    if oryg.startswith("\\px"):
+        pref = oryg[: oryg.find(";") + 1]
+    a = d.zakonczenie_a_adres
+    b = d.zakonczenie_b_adres
+    return f"{pref}{a} - \\P{b}"
+
+
+def _zbuduj_ramke_kabel(oryg: str, d, dl_tras: str, dl_mont: str) -> str:
+    """
+    Buduje treść ramki:
+      Proj. kabel <typ> - <nr kabla>
+      dł. trasowa w kanalizacji Orange Polska S.A.: <X> m
+      dł. montażowa w kanalizacji Orange Polska S.A.: <Y> m
+    Zachowuje prefiks akapitu (\\pxi...) jeśli był.
+    """
+    pref = ""
+    if oryg.startswith("\\px"):
+        pref = oryg[: oryg.find(";") + 1]
+    typ = d.typ_kabla or "Z-XOTKtsd"
+    nrk = d.nr_kabla or ""
+    srednica = f" Ø {d.srednica_kabla} mm" if d.srednica_kabla else ""
+    return (
+        f"{pref}{{\\T0.95;Proj.\\Ikabel {typ}{srednica} - {nrk}"
+        f"\\P\\pi0,l0;dł. trasowa w kanalizacji Orange Polska S.A.: {dl_tras} m"
+        f"\\Pdł. montażowa w kanalizacji Orange Polska S.A.: {dl_mont} m}}"
+    )
+
+
+def _zbuduj_zakonczenie(oryg: str, strona: str, d) -> str:
+    pref = ""
+    if oryg.startswith("\\px"):
+        pref = oryg[: oryg.find(";") + 1]
+    if strona == "A":
+        adres = d.zakonczenie_a_adres
+        studnia = d.zakonczenie_a_studnia
+        opis = d.zakonczenie_a_opis or "Wyjście rurą HDPE"
+    else:
+        adres = d.zakonczenie_b_adres
+        studnia = d.zakonczenie_b_studnia
+        opis = d.zakonczenie_b_opis or "Dowiązanie do projektowanej mufy"
+    typ = d.typ_kabla or "Z-XOTKtsd"
+    srednica = f" %%C {d.srednica_kabla} mm" if d.srednica_kabla else ""
+    return (
+        f"{pref}Zakończenie {strona}:\\P{adres}\\P\\pq*;Studnia OPL S.A.: {studnia}"
+        f"\\P\\pql;{{\\C30;Proj. kabel {typ}{srednica}\\P{opis}}}"
+    )
 
 
 def generuj_z_szablonu(
@@ -124,6 +254,7 @@ def generuj_z_szablonu(
     msp = doc.modelspace()
     dxf_model._rysuj_trase(msp, proj)
     dxf_model._rysuj_studnie(msp, proj)
+    dxf_model._rysuj_odbite_linie(msp, proj)
     dxf_model._rysuj_wymiary(msp, proj)
     dxf_model._rysuj_numery(msp, proj)
     dxf_model._rysuj_nazwy(msp, proj)

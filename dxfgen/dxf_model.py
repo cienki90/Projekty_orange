@@ -119,11 +119,11 @@ def _tekst_z_maska(msp, tekst, pozycja, wysokosc, warstwa, kat=0.0,
     # MASKA TŁA: użyj koloru tła rysunku (canvas), margines 1.2 wokół tekstu.
     # bg_fill=1 => fill z koloru tła; współczynnik 1.2 ustawia ramkę maski.
     try:
-        mt.set_bg_color("canvas", scale=1.2)
+        mt.set_bg_color("canvas", scale=1.0)
     except Exception:
         # fallback: ustaw atrybuty wprost
         mt.dxf.bg_fill = 1
-        mt.dxf.box_fill_scale = 1.2
+        mt.dxf.box_fill_scale = 1.0
         mt.dxf.bg_fill_color = 0
     return mt
 
@@ -162,6 +162,21 @@ def _rysuj_studnie(msp, proj: Projekt) -> None:
         msp.add_blockref(
             "studnia", (s.x, s.y),
             dxfattribs={"layer": "kanalizacja instniejaca", "rotation": kat},
+        )
+
+
+def _rysuj_odbite_linie(msp, proj: Projekt) -> None:
+    """
+    Odbita linia 15 jednostek przy KAŻDEJ studni — pomarańczowa (ACI 30),
+    przerywana (warstwa 'kabel projektowany'), prostopadle do trasy.
+    To standardowy element rysunku (miejsce na przyszłe zapasy/mufy).
+    """
+    for i, s in enumerate(proj.studnie):
+        off = _wektor_normalny(proj, i, dystans=TRASA_ODSUNIECIE)  # 15 j
+        bx, by = s.x + off[0], s.y + off[1]
+        msp.add_lwpolyline(
+            [(s.x, s.y), (bx, by)],
+            dxfattribs={"layer": "kabel projektowany"},
         )
 
 
@@ -315,6 +330,7 @@ def zbuduj_dokument(proj: Projekt):
     msp = doc.modelspace()
     _rysuj_trase(msp, proj)
     _rysuj_studnie(msp, proj)
+    _rysuj_odbite_linie(msp, proj)
     _rysuj_wymiary(msp, proj)
     _rysuj_numery(msp, proj)
     _rysuj_nazwy(msp, proj)

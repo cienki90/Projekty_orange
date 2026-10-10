@@ -100,6 +100,33 @@ def _znajdz_wartosc(sheet, etykieta_fragment: str, max_rows: int | None = None):
     return ""
 
 
+def _znajdz_wartosc_dowolna_kol(sheet, etykieta_fragment: str):
+    """
+    Jak _znajdz_wartosc, ale etykieta może być w DOWOLNEJ kolumnie wiersza;
+    zwraca pierwszą niepustą komórkę na prawo od etykiety.
+    """
+    for r in range(sheet.nrows):
+        for c in range(sheet.ncols):
+            if etykieta_fragment.lower() in _komorka(sheet, r, c).lower():
+                for cc in range(c + 1, sheet.ncols):
+                    val = _komorka(sheet, r, cc)
+                    if val:
+                        return val
+    return ""
+
+
+def _znajdz_po_wzorcu(sheet, wzorzec: str):
+    """Szuka pierwszej komórki pasującej do wyrażenia regularnego."""
+    rx = re.compile(wzorzec)
+    for r in range(sheet.nrows):
+        for c in range(sheet.ncols):
+            v = _komorka(sheet, r, c)
+            m = rx.search(v)
+            if m:
+                return m.group(0)
+    return ""
+
+
 def wczytaj_wt(sciezka: str) -> tuple[DaneProjektu, list[Odcinek]]:
     """Czyta wt.xls — zwraca (metadane Formularz 1K, lista odcinków z Zał 3)."""
     import xlrd
@@ -120,7 +147,11 @@ def _czytaj_formularz_1k(wb) -> DaneProjektu:
     def czysc(s: str) -> str:
         return re.sub(r"\s*\n\s*\(\s*\)\s*$", "", s).strip()
 
-    dane.nr_kabla = czysc(_znajdz_wartosc(sh, "nr kabla") or _znajdz_wartosc(sh, "Zapytanie nr"))
+    dane.nr_kabla = czysc(
+        _znajdz_wartosc_dowolna_kol(sh, "nr kabla")
+        or _znajdz_wartosc_dowolna_kol(sh, "Zapytanie nr")
+        or _znajdz_po_wzorcu(sh, r"WTROI/\d+/\w+")
+    )
     dane.operator = _znajdz_wartosc(sh, "NAZWA OPERATORA")
     dane.adres_operatora = _znajdz_wartosc(sh, "ADRES OPERATORA")
     dane.miasto = _znajdz_wartosc(sh, "DOSTĘP DO KANALIZACJI")
