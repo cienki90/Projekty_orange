@@ -24,10 +24,14 @@ def zbuduj_projekt(sciezka_wspolrzedne: str, sciezka_wt: str) -> Projekt:
     for s in studnie:
         s.x, s.y = crs.wgs84_do_2000(s.lat, s.lon, epsg)
 
-    # zakończenia A/B = pierwsza i ostatnia studnia trasy
-    if studnie:
-        dane.zakonczenie_a_studnia = dane.zakonczenie_a_studnia or studnie[0].nazwa
-        dane.zakonczenie_b_studnia = dane.zakonczenie_b_studnia or studnie[-1].nazwa
+    # zakończenia A/B — nazwa studni z Zał 3 (początek pierwszego / koniec ostatniego
+    # odcinka); jeśli brak odcinków, użyj skrajnych studni z współrzędnych
+    if odcinki:
+        dane.zakonczenie_a_studnia = odcinki[0].studnia_a
+        dane.zakonczenie_b_studnia = odcinki[-1].studnia_b
+    elif studnie:
+        dane.zakonczenie_a_studnia = studnie[0].nazwa
+        dane.zakonczenie_b_studnia = studnie[-1].nazwa
 
     proj = Projekt(
         studnie=studnie,

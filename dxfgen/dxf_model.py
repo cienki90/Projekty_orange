@@ -43,7 +43,7 @@ KANALY_WYS = 1.5           # wysokość cyfry liczby kanałów pod wymiarem
 LW_TRASA = 50               # trasa czarna 0,50 mm
 LW_OPIS = 20                # opisy 0,20 mm
 
-LTYPE_PRZERYWANA = "ACAD_ISO03W100"  # przerywana (jak w wzorcu, warstwa Światłowód)
+LTYPE_PRZERYWANA = "DASHED"  # przerywana linia odbitej kreski (standardowy DASHED)
 
 WARSTWY = [
     # (nazwa, kolor ACI, typ_linii, lineweight)
@@ -65,13 +65,13 @@ STYL_ARIAL = "Arial"
 
 
 def _utworz_warstwy(doc) -> None:
-    # upewnij się, że typ linii przerywanej istnieje
+    # upewnij się, że typ linii przerywanej istnieje (DASHED)
     if LTYPE_PRZERYWANA not in doc.linetypes:
         try:
             doc.linetypes.add(
                 LTYPE_PRZERYWANA,
-                pattern=[6.0, 4.0, -2.0],  # kreska-spacja (ISO dash)
-                description="__ __ __ przerywana",
+                pattern="A,3.0,-1.5",  # kreska 3 / spacja 1,5 (metry) — widoczna w skali
+                description="Dashed __ __ __ __",
             )
         except Exception:
             pass
@@ -191,11 +191,29 @@ def _rysuj_numery(msp, proj: Projekt) -> None:
 
 
 def _rysuj_nazwy(msp, proj: Projekt) -> None:
-    """Nazwa studni RÓWNOLEGLE do trasy, z maską tła, po przeciwnej stronie niż numer."""
+    """
+    Nazwy studni RÓWNOLEGLE do trasy, z maską tła i UNIKANIEM KOLIZJI.
+    Gdy etykieta musi być odsunięta — rysowany jest leader (linia odniesienia).
+    """
+    from .etykiety import Prostokat, rozmiesc_etykiety
+
+    # obszary zajęte: kółka numerów (po przeciwnej stronie) + sama trasa (punkty studni)
+    zajete = []
     for i, s in enumerate(proj.studnie):
-        off = _wektor_normalny(proj, i, dystans=-4.0)
-        tx, ty = s.x + off[0], s.y + off[1]
-        kat = _kat_trasy(proj, i)
+        off = _wektor_normalny(proj, i, dystans=3.0)
+        zajete.append(Prostokat(s.x + off[0], s.y + off[1],
+                                 NUMER_PROMIEN * 2, NUMER_PROMIEN * 2))
+        # punkt studni (znacznik) jako mała przeszkoda
+        zajete.append(Prostokat(s.x, s.y, STUDNIA_BOK, STUDNIA_BOK))
+
+    rozmieszczenie = rozmiesc_etykiety(
+        proj.studnie, lambda i: _kat_trasy(proj, i), NAZWA_WYS, zajete
+    )
+    for s, (tx, ty), kat, czy_leader in rozmieszczenie:
+        if czy_leader:
+            # linia odniesienia od studni do etykiety
+            msp.add_line((s.x, s.y), (tx, ty),
+                         dxfattribs={"layer": "Nazwa studni"})
         _tekst_z_maska(msp, s.nazwa, (tx, ty), NAZWA_WYS, "Nazwa studni", kat=kat)
 
 

@@ -290,17 +290,32 @@ def generuj_z_szablonu(
 
 
 def _klonuj_layout(doc, bazowy, nowa_nazwa: str):
-    """Klonuje layout bazowy wraz z zawartością (tabelka, ramka, rzutnia)."""
+    """
+    Klonuje layout bazowy wraz z zawartością (tabelka, ramka, rzutnia)
+    ORAZ ustawieniami strony A3 (DWG To PDF, marginesy jak w wzorcu).
+    """
     if nowa_nazwa in doc.layouts.names():
         doc.layouts.delete(nowa_nazwa)
     nowy = doc.layouts.new(nowa_nazwa)
-    # skopiuj ustawienia strony
+
+    # 1) ustaw stronę A3 jak w wzorcu (kluczowe — bez tego kopie mają zły format!)
+    try:
+        nowy.page_setup(
+            size=(420, 297),
+            margins=(20, 6, 6, 6),  # (top, right, bottom, left)
+            units="mm",
+            offset=(0, 0),
+            rotation=0,
+        )
+        nowy.dxf.plot_configuration_file = "DWG To PDF.pc3"
+    except Exception:
+        pass
     try:
         nowy.dxf.plot_layout_flags = bazowy.dxf.plot_layout_flags
     except Exception:
         pass
-    # skopiuj encje paper space
-    import ezdxf
+
+    # 2) skopiuj encje paper space (tabelka, ramki, rzutnie, opisy)
     for e in bazowy:
         try:
             nowa = e.copy()
