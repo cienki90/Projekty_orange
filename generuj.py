@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 
 from dxfgen.budowa import zbuduj_projekt
-from dxfgen.dxf_model import generuj_model_dxf
+from dxfgen.generator import generuj_pelny_dxf
 
 
 def main(argv: list[str]) -> int:
@@ -34,7 +34,8 @@ def main(argv: list[str]) -> int:
         s0 = proj.studnie[0]
         print(f"  1. studnia:        {s0.nazwa}  -> X={s0.x:.3f}  Y={s0.y:.3f}")
 
-    sciezka = generuj_model_dxf(proj, wyjscie)
+    sciezka, n_ark = generuj_pelny_dxf(proj, wyjscie)
+    print(f"  Arkusze A3 1:1000: {n_ark}")
     print(f"Zapisano DXF: {sciezka}")
     return 0
 

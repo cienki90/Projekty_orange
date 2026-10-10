@@ -25,17 +25,17 @@ from ezdxf.enums import TextEntityAlignment
 
 from .model import Projekt, ReserveKind
 
-# --- stałe wyglądu (w metrach model space) ---
+# --- stałe wyglądu (w metrach model space) — WARTOŚCI WZIĘTE Z zab2.dxf ---
 ACI_POMARANCZ = 30          # kolor trasy/kabla/zapasów/muf
 ACI_BIALY = 7               # opisy, numery, obramowania
-STUDNIA_BOK = 1.2           # bok kwadratu studni [m]
-NUMER_PROMIEN = 1.6         # promień kółka numeru porządkowego [m]
+STUDNIA_BOK = 1.2           # bok kwadratu studni [m]  (wzorzec: 1,2)
+NUMER_PROMIEN = 1.6         # promień kółka numeru porządkowego [m]  (wzorzec: ~1,6)
 TRASA_ODSUNIECIE = 4.0      # odsunięcie pomarańczowej kreski zapasów od trasy [m]
 ZAPAS_BOK = 3.0             # bok prostokąta zapasu [m]
 MUFA_BOK = 3.0              # bok trójkąta mufy [m]
-NAZWA_WYS = 2.2             # wysokość tekstu nazwy studni [m]
-NUMER_WYS = 2.0             # wysokość tekstu numeru [m]
-WYMIAR_WYS = 2.0            # wysokość tekstu wymiaru [m]
+NAZWA_WYS = 1.6             # wysokość tekstu nazwy studni [m]  (wzorzec: 1,6)
+NUMER_WYS = 1.6             # wysokość tekstu numeru [m]        (wzorzec: 1,6)
+WYMIAR_WYS = 2.0            # wysokość tekstu wymiaru [m]       (wzorzec: 2,0)
 
 WARSTWY = [
     # (nazwa, kolor ACI)
@@ -228,10 +228,10 @@ def _fmt(v: float) -> str:
 
 # --- API ---
 
-def generuj_model_dxf(proj: Projekt, sciezka_wyjscia: str) -> str:
+def zbuduj_dokument(proj: Projekt):
     """
-    Tworzy DXF (AutoCAD 2010) z zawartością model space.
-    Zwraca ścieżkę zapisanego pliku.
+    Tworzy dokument DXF (R2010) i rysuje całą zawartość model space.
+    Zwraca obiekt ezdxf.Drawing (bez zapisu) — do dalszej obróbki (arkusze).
     """
     doc = ezdxf.new("R2010", setup=True)
     doc.header["$INSUNITS"] = 6  # metry
@@ -248,5 +248,11 @@ def generuj_model_dxf(proj: Projekt, sciezka_wyjscia: str) -> str:
     _rysuj_nazwy(msp, proj)
     _rysuj_zapasy_mufy(msp, proj)
 
+    return doc
+
+
+def generuj_model_dxf(proj: Projekt, sciezka_wyjscia: str) -> str:
+    """Tworzy DXF tylko z model space (Etap 1). Zwraca ścieżkę pliku."""
+    doc = zbuduj_dokument(proj)
     doc.saveas(sciezka_wyjscia)
     return sciezka_wyjscia

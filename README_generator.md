@@ -16,7 +16,10 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
 - [x] **Etap 1** — rdzeń: wczytanie danych, transformacja WGS84→PL-2000,
       model space (trasa, studnie, numery w kółkach, nazwy, wymiary z WT,
       zapasy/mufy na pomarańczowej kresce).
-- [ ] **Etap 2** — arkusze A3 1:1000 (DWG To PDF), tabelka, podział na strony.
+- [x] **Etap 2** — arkusze A3 1:1000 (DWG To PDF, marginesy 20/6/6/6),
+      viewporty z fragmentami trasy, podział na strony z zakładem na ostatnią
+      widoczną studnię (lub zadaną odległość), tabelka rysunkowa z WT
+      (z kontrolą mieszczenia tekstu).
 - [ ] **Etap 3** — podkład OSM (raster, odcienie szarości).
 - [ ] **Etap 4** — GUI (PySide6): wczytywanie plików, lista + wskazywanie
       zapasów/muf, podgląd, generowanie.
@@ -28,10 +31,20 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
 pip install -r requirements.txt
 ```
 
-## Użycie (CLI, Etap 1)
+## Użycie (CLI)
 
 ```bash
 python generuj.py współrzędne.xlsx wt.xls wynik.dxf
+```
+
+Generuje DXF z model space + arkuszami A3 (1:1000). Wynik:
+```
+  Studnie:           41
+  Odcinki (WT):      40
+  Strefa PL-2000:    EPSG:2178
+  Dł. trasowa (WT):  1153.4 m
+  Dł. montażowa:     1188.0 m
+  Arkusze A3 1:1000: 4
 ```
 
 ## Weryfikacja dokładności
