@@ -71,8 +71,23 @@ Dla danych testowych (Ząbki) transformacja odwzorowuje studnie wzorca
 trasowa (1153,4 m) i strefa (EPSG:2178, strefa 7) zgadzają się z projektem
 źródłowym.
 
+## Arkusze i tabelka ze wzorca
+
+Arkusze A3 (1:1000) **i tabelka projektowa są kopiowane wprost z `zab2.dxf`**
+(szablon). Program wczytuje wzorzec, czyści jego model space i rysuje nowe dane,
+zachowując format arkusza, marginesy, drukarkę „DWG To PDF", rzutnie oraz układ
+i treść tabelki. Dlatego **plik `zab2.dxf` musi znajdować się w katalogu** z
+danymi. Gdy go brak — program tworzy arkusze zastępcze (fallback).
+
 ## Założenia projektowe
 
+- Trasa: **czarna, ciągła, 0,50 mm** (warstwa Światłowód).
+- Odbita kreska zapasów/muf: **15 jednostek, kolor 30 (pomarańcz), przerywana**
+  (ACAD_ISO03W100).
+- Opisy (nazwy studni, numery, wymiary) oraz znaczniki studni — **równoległe do
+  trasy**; każdy tekst ma **maskę tła** (nie koliduje z trasą/kreskami).
+- Wysokość tekstu wymiarów: **1,5**; pod wymiarem — równolegle cyfra liczby
+  kanałów ("1").
 - Długość **trasowa** = suma odcinków z WT (Zał 3).
 - Długość **montażowa** = `trasowa × 1,03 + Σ(zapasy)`; wynik zaokrąglany do 0,1 m.
 - Zapas: `SZ-x` (pomarańczowy prostokąt + długość w kółku), tylko przy studniach.

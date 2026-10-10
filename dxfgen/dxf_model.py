@@ -26,39 +26,66 @@ from ezdxf.enums import TextEntityAlignment
 from .model import Projekt, ReserveKind
 
 # --- stałe wyglądu (w metrach model space) — WARTOŚCI WZIĘTE Z zab2.dxf ---
-ACI_POMARANCZ = 30          # kolor trasy/kabla/zapasów/muf
-ACI_BIALY = 7               # opisy, numery, obramowania
+ACI_POMARANCZ = 30          # kolor odbitej kreski / zapasów / muf
+ACI_CZARNY = 7              # trasa, opisy, numery (7 = czarny na białym tle)
+ACI_BIALY = 7
 STUDNIA_BOK = 1.2           # bok kwadratu studni [m]  (wzorzec: 1,2)
 NUMER_PROMIEN = 1.6         # promień kółka numeru porządkowego [m]  (wzorzec: ~1,6)
-TRASA_ODSUNIECIE = 4.0      # odsunięcie pomarańczowej kreski zapasów od trasy [m]
+TRASA_ODSUNIECIE = 15.0     # długość odbitej kreski (wzorzec: 15 jednostek)
 ZAPAS_BOK = 3.0             # bok prostokąta zapasu [m]
 MUFA_BOK = 3.0              # bok trójkąta mufy [m]
 NAZWA_WYS = 1.6             # wysokość tekstu nazwy studni [m]  (wzorzec: 1,6)
 NUMER_WYS = 1.6             # wysokość tekstu numeru [m]        (wzorzec: 1,6)
-WYMIAR_WYS = 2.0            # wysokość tekstu wymiaru [m]       (wzorzec: 2,0)
+WYMIAR_WYS = 1.5            # wysokość tekstu wymiaru [m]       (zmniejszone na życzenie: 1,5)
+KANALY_WYS = 1.5           # wysokość cyfry liczby kanałów pod wymiarem
+
+# lineweight w setnych mm (DXF): 50 = 0,50 mm
+LW_TRASA = 50               # trasa czarna 0,50 mm
+LW_OPIS = 20                # opisy 0,20 mm
+
+LTYPE_PRZERYWANA = "ACAD_ISO03W100"  # przerywana (jak w wzorcu, warstwa Światłowód)
 
 WARSTWY = [
-    # (nazwa, kolor ACI)
-    ("Światłowód", ACI_POMARANCZ),
-    ("kabel projektowany", ACI_POMARANCZ),
-    ("kanalizacja instniejaca", ACI_BIALY),
-    ("Nazwa studni", ACI_BIALY),
-    ("l. porządkowa studni", ACI_BIALY),
-    ("_liczba", ACI_BIALY),
-    ("wymiary", ACI_BIALY),
-    ("wymiarowanie", ACI_POMARANCZ),
-    ("Otworówka", ACI_BIALY),
-    ("obramowanie ramek", ACI_BIALY),
-    ("Defpoints", ACI_BIALY),
+    # (nazwa, kolor ACI, typ_linii, lineweight)
+    ("Światłowód", ACI_CZARNY, "Continuous", LW_TRASA),         # TRASA: czarna, ciągła, 0,5 mm
+    ("kabel projektowany", ACI_POMARANCZ, LTYPE_PRZERYWANA, 50),# odbita kreska: pomarańcz, przerywana
+    ("kanalizacja instniejaca", ACI_BIALY, "Continuous", 40),
+    ("Nazwa studni", ACI_BIALY, "Continuous", LW_OPIS),
+    ("l. porządkowa studni", ACI_BIALY, "Continuous", LW_OPIS),
+    ("_liczba", ACI_BIALY, "Continuous", LW_OPIS),
+    ("_liczba kanałów", ACI_BIALY, "Continuous", LW_OPIS),
+    ("wymiary", ACI_BIALY, "Continuous", LW_OPIS),
+    ("wymiarowanie", ACI_POMARANCZ, "Continuous", 18),
+    ("Otworówka", ACI_BIALY, "Continuous", LW_OPIS),
+    ("obramowanie ramek", ACI_BIALY, "Continuous", LW_OPIS),
+    ("Defpoints", ACI_BIALY, "Continuous", -3),
 ]
 
 STYL_ARIAL = "Arial"
 
 
 def _utworz_warstwy(doc) -> None:
-    for nazwa, kolor in WARSTWY:
-        if nazwa not in doc.layers:
-            doc.layers.add(nazwa, color=kolor)
+    # upewnij się, że typ linii przerywanej istnieje
+    if LTYPE_PRZERYWANA not in doc.linetypes:
+        try:
+            doc.linetypes.add(
+                LTYPE_PRZERYWANA,
+                pattern=[6.0, 4.0, -2.0],  # kreska-spacja (ISO dash)
+                description="__ __ __ przerywana",
+            )
+        except Exception:
+            pass
+    for nazwa, kolor, ltype, lw in WARSTWY:
+        if nazwa in doc.layers:
+            lay = doc.layers.get(nazwa)
+        else:
+            lay = doc.layers.add(nazwa)
+        lay.dxf.color = kolor
+        try:
+            lay.dxf.linetype = ltype if ltype in doc.linetypes else "Continuous"
+            lay.dxf.lineweight = lw
+        except Exception:
+            pass
 
 
 def _utworz_styl_arial(doc) -> None:
@@ -79,46 +106,88 @@ def _utworz_blok_studni(doc) -> None:
     )
 
 
+def _tekst_z_maska(msp, tekst, pozycja, wysokosc, warstwa, kat=0.0,
+                   align=TextEntityAlignment.MIDDLE_CENTER):
+    """
+    Dodaje MTEXT z MASKĄ TŁA (background fill), obrócony o `kat` stopni.
+    Maska tła przesłania obiekty pod tekstem (trasa, kreski) — czytelność.
+    """
+    mt = msp.add_mtext(tekst, dxfattribs={"layer": warstwa, "style": STYL_ARIAL})
+    mt.dxf.char_height = wysokosc
+    mt.dxf.rotation = kat
+    mt.set_location(pozycja, attachment_point=5)  # 5 = MIDDLE_CENTER
+    # MASKA TŁA: użyj koloru tła rysunku (canvas), margines 1.2 wokół tekstu.
+    # bg_fill=1 => fill z koloru tła; współczynnik 1.2 ustawia ramkę maski.
+    try:
+        mt.set_bg_color("canvas", scale=1.2)
+    except Exception:
+        # fallback: ustaw atrybuty wprost
+        mt.dxf.bg_fill = 1
+        mt.dxf.box_fill_scale = 1.2
+        mt.dxf.bg_fill_color = 0
+    return mt
+
+
+def _kat_trasy(proj: Projekt, idx: int) -> float:
+    """Kąt stycznej do trasy w studni idx [stopnie], znormalizowany do czytelności."""
+    s = proj.studnie
+    if len(s) < 2:
+        return 0.0
+    if idx == 0:
+        dx, dy = s[1].x - s[0].x, s[1].y - s[0].y
+    elif idx == len(s) - 1:
+        dx, dy = s[-1].x - s[-2].x, s[-1].y - s[-2].y
+    else:
+        dx, dy = s[idx + 1].x - s[idx - 1].x, s[idx + 1].y - s[idx - 1].y
+    kat = math.degrees(math.atan2(dy, dx))
+    if kat > 90 or kat <= -90:
+        kat += 180  # tekst zawsze "do góry nogami" czytelny
+    return kat
+
+
 def _rysuj_trase(msp, proj: Projekt) -> None:
-    """Polilinia trasy (Światłowód) — odcinki proste studnia->studnia."""
+    """Trasa (Światłowód) — czarna, ciągła, 0,50 mm. Odcinki proste studnia->studnia."""
     pkty = [(s.x, s.y) for s in proj.studnie]
     if len(pkty) >= 2:
-        msp.add_lwpolyline(pkty, dxfattribs={"layer": "Światłowód"})
+        msp.add_lwpolyline(
+            pkty,
+            dxfattribs={"layer": "Światłowód", "lineweight": LW_TRASA},
+        )
 
 
 def _rysuj_studnie(msp, proj: Projekt) -> None:
-    for s in proj.studnie:
-        msp.add_blockref("studnia", (s.x, s.y), dxfattribs={"layer": "kanalizacja instniejaca"})
+    """Znacznik studni (blok) obrócony RÓWNOLEGLE do trasy."""
+    for i, s in enumerate(proj.studnie):
+        kat = _kat_trasy(proj, i)
+        msp.add_blockref(
+            "studnia", (s.x, s.y),
+            dxfattribs={"layer": "kanalizacja instniejaca", "rotation": kat},
+        )
 
 
 def _rysuj_numery(msp, proj: Projekt) -> None:
-    """Numer porządkowy w kółku, odsunięty prostopadle od trasy, by nie zasłaniać."""
+    """Numer porządkowy w kółku, odsunięty prostopadle; tekst RÓWNOLEGLE do trasy."""
     for i, s in enumerate(proj.studnie):
-        # kierunek odsunięcia numeru = prostopadły do trasy w tym punkcie
         off = _wektor_normalny(proj, i, dystans=3.0)
         cx, cy = s.x + off[0], s.y + off[1]
+        kat = _kat_trasy(proj, i)
         msp.add_circle((cx, cy), NUMER_PROMIEN, dxfattribs={"layer": "_liczba"})
-        msp.add_text(
-            str(s.nr),
-            dxfattribs={"layer": "_liczba", "style": STYL_ARIAL, "height": NUMER_WYS},
-        ).set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
+        _tekst_z_maska(msp, str(s.nr), (cx, cy), NUMER_WYS, "_liczba", kat=kat)
 
 
 def _rysuj_nazwy(msp, proj: Projekt) -> None:
-    """Nazwa studni odsunięta po przeciwnej stronie niż numer."""
+    """Nazwa studni RÓWNOLEGLE do trasy, z maską tła, po przeciwnej stronie niż numer."""
     for i, s in enumerate(proj.studnie):
-        off = _wektor_normalny(proj, i, dystans=-3.5)
+        off = _wektor_normalny(proj, i, dystans=-4.0)
         tx, ty = s.x + off[0], s.y + off[1]
-        msp.add_text(
-            s.nazwa,
-            dxfattribs={"layer": "Nazwa studni", "style": STYL_ARIAL, "height": NAZWA_WYS},
-        ).set_placement((tx, ty), align=TextEntityAlignment.MIDDLE_CENTER)
+        kat = _kat_trasy(proj, i)
+        _tekst_z_maska(msp, s.nazwa, (tx, ty), NAZWA_WYS, "Nazwa studni", kat=kat)
 
 
 def _rysuj_wymiary(msp, proj: Projekt) -> None:
     """
-    Wymiar odcinka = długość z WT, pisany w połowie odcinka trasy.
-    Dopasowanie odcinków WT do par studni po nazwach.
+    Wymiar odcinka = długość z WT (wys. 1,5), RÓWNOLEGLE do odcinka, z maską tła.
+    Pod wymiarem (równolegle) cyfra "1" = liczba kanałów.
     """
     nazwa_do_idx = {s.nazwa: i for i, s in enumerate(proj.studnie)}
     for o in proj.odcinki:
@@ -131,40 +200,50 @@ def _rysuj_wymiary(msp, proj: Projekt) -> None:
         mx, my = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
         kat = math.degrees(math.atan2(b.y - a.y, b.x - a.x))
         if kat > 90 or kat < -90:
-            kat += 180  # tekst zawsze czytelny
-        tekst = _fmt(o.dlugosc_wt)
-        msp.add_text(
-            tekst,
-            dxfattribs={
-                "layer": "wymiary",
-                "style": STYL_ARIAL,
-                "height": WYMIAR_WYS,
-                "rotation": kat,
-            },
-        ).set_placement((mx, my), align=TextEntityAlignment.MIDDLE_CENTER)
+            kat += 180
+        # wektor "w dół" prostopadle do odcinka (dla cyfry liczby kanałów)
+        rad = math.radians(kat)
+        nx, ny = math.sin(rad), -math.cos(rad)  # normalna
+        odsun = WYMIAR_WYS * 1.4
+        # wymiar nad linią trasy
+        _tekst_z_maska(msp, _fmt(o.dlugosc_wt),
+                       (mx - nx * odsun, my - ny * odsun),
+                       WYMIAR_WYS, "wymiary", kat=kat)
+        # cyfra "1" (liczba kanałów) pod linią trasy, równolegle
+        _tekst_z_maska(msp, "1",
+                       (mx + nx * odsun, my + ny * odsun),
+                       KANALY_WYS, "_liczba kanałów", kat=kat)
 
 
 def _rysuj_zapasy_mufy(msp, proj: Projekt) -> None:
-    """Zapasy (prostokąt) i mufy (trójkąt) na pomarańczowej kresce przy studni."""
+    """
+    Zapasy (SZ) i mufy (ZR) na ODBITEJ KRESCE 15 j — pomarańczowej, przerywanej
+    (warstwa 'kabel projektowany'). Symbol na końcu kreski, etykieta z maską tła.
+    """
     proj.przelicz_numery_zapasow()
     for z in proj.zapasy:
         s = proj.studnia_po_nazwie(z.studnia)
         if s is None:
             continue
         idx = next((i for i, ss in enumerate(proj.studnie) if ss.nazwa == z.studnia), 0)
-        off = _wektor_normalny(proj, idx, dystans=TRASA_ODSUNIECIE)
+        off = _wektor_normalny(proj, idx, dystans=TRASA_ODSUNIECIE)  # 15 j
         bx, by = s.x + off[0], s.y + off[1]
+        kat = _kat_trasy(proj, idx)
 
-        # pomarańczowa kreska odbijająca od trasy do symbolu
-        msp.add_line((s.x, s.y), (bx, by), dxfattribs={"layer": "kabel projektowany"})
+        # odbita kreska 15 j — pomarańczowa przerywana (ltype/kolor z warstwy)
+        msp.add_lwpolyline(
+            [(s.x, s.y), (bx, by)],
+            dxfattribs={"layer": "kabel projektowany"},
+        )
 
         if z.kind == ReserveKind.ZAPAS:
-            _symbol_zapas(msp, bx, by, z)
+            _symbol_zapas(msp, bx, by, z, kat)
         else:
-            _symbol_mufa(msp, bx, by, z)
+            _symbol_mufa(msp, bx, by, z, kat)
 
 
-def _symbol_zapas(msp, cx, cy, z) -> None:
+def _symbol_zapas(msp, cx, cy, z, kat) -> None:
+    """Pomarańczowy prostokąt (zapas) + długość w kółku + etykieta SZ-x z maską."""
     h = ZAPAS_BOK / 2.0
     msp.add_lwpolyline(
         [(cx - h, cy - h), (cx + h, cy - h), (cx + h, cy + h), (cx - h, cy + h)],
@@ -174,29 +253,22 @@ def _symbol_zapas(msp, cx, cy, z) -> None:
     # kółko z długością zapasu
     kx, ky = cx + ZAPAS_BOK, cy + ZAPAS_BOK
     msp.add_circle((kx, ky), NUMER_PROMIEN, dxfattribs={"layer": "wymiarowanie"})
-    msp.add_text(
-        _fmt(z.dlugosc),
-        dxfattribs={"layer": "wymiarowanie", "style": STYL_ARIAL, "height": NUMER_WYS},
-    ).set_placement((kx, ky), align=TextEntityAlignment.MIDDLE_CENTER)
+    _tekst_z_maska(msp, _fmt(z.dlugosc), (kx, ky), NUMER_WYS, "wymiarowanie", kat=kat)
     # etykieta SZ-x
-    msp.add_text(
-        z.etykieta,
-        dxfattribs={"layer": "wymiarowanie", "style": STYL_ARIAL, "height": NUMER_WYS},
-    ).set_placement((cx, cy - ZAPAS_BOK), align=TextEntityAlignment.MIDDLE_CENTER)
+    _tekst_z_maska(msp, z.etykieta, (cx, cy - ZAPAS_BOK - 1.0),
+                   NUMER_WYS, "wymiarowanie", kat=kat)
 
 
-def _symbol_mufa(msp, cx, cy, z) -> None:
+def _symbol_mufa(msp, cx, cy, z, kat) -> None:
+    """Pomarańczowy trójkąt (mufa) + etykieta ZR-x z maską."""
     h = MUFA_BOK / 2.0
     pkty = [(cx, cy + h), (cx - h, cy - h), (cx + h, cy - h)]
-    # wypełniony trójkąt (SOLID) w pomarańczu
     msp.add_solid(
         [pkty[0], pkty[1], pkty[2], pkty[2]],
         dxfattribs={"layer": "kabel projektowany"},
     )
-    msp.add_text(
-        z.etykieta,
-        dxfattribs={"layer": "wymiarowanie", "style": STYL_ARIAL, "height": NUMER_WYS},
-    ).set_placement((cx, cy - MUFA_BOK), align=TextEntityAlignment.MIDDLE_CENTER)
+    _tekst_z_maska(msp, z.etykieta, (cx, cy - MUFA_BOK - 1.0),
+                   NUMER_WYS, "wymiarowanie", kat=kat)
 
 
 # --- geometria pomocnicza ---
