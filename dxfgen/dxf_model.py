@@ -241,15 +241,35 @@ def _strona_offsetu(proj: Projekt, idx: int) -> tuple[float, float]:
     return _normalna(dx, dy)
 
 
-def _rysuj_wymiary(msp, proj: Projekt) -> list:
+def _rysuj_wymiary(msp, proj: Projekt, rejestr: list) -> None:
     """
     Wymiar odcinka = długość z WT (wys. 1,5), RÓWNOLEGLE do odcinka, z maską tła.
     Pod wymiarem (równolegle) cyfra "1" = liczba kanałów.
-    Zwraca listę zajętych prostokątów (do unikania kolizji przez numery).
+    Pozycje szukane z unikaniem kolizji (wspólny rejestr) — przy ciasnocie
+    wymiar/cyfra przesuwają się wzdłuż odcinka lub dalej od trasy.
     """
-    from .etykiety import Prostokat, szerokosc_tekstu
+    from .etykiety import ramka_tekstu, _koliduja
     nazwa_do_idx = {s.nazwa: i for i, s in enumerate(proj.studnie)}
-    zajete = []
+
+    def umiesc(tekst, mx, my, nx, ny, tx, ty, baza, h, warstwa):
+        """Znajdź wolne miejsce: rośnie odsunięcie prostopadłe + wzdłuż odcinka."""
+        for kp in range(0, 8):
+            ods = baza + kp * (h * 0.9)
+            for kw in range(0, 5):
+                for zw in ((0,) if kw == 0 else (1, -1)):
+                    cx = mx + nx * ods + tx * (kw * h * 1.1 * zw)
+                    cy = my + ny * ods + ty * (kw * h * 1.1 * zw)
+                    r = ramka_tekstu(tekst, cx, cy, h, 0)  # bbox niezal. od obrotu dla testu
+                    if not any(_koliduja(r, q) for q in rejestr):
+                        _tekst_z_maska(msp, tekst, (cx, cy), h, warstwa, kat=katg)
+                        rejestr.append(ramka_tekstu(tekst, cx, cy, h,
+                                                    math.degrees(math.atan2(ty, tx))))
+                        return
+        # ostateczność
+        cx, cy = mx + nx * baza, my + ny * baza
+        _tekst_z_maska(msp, tekst, (cx, cy), h, warstwa, kat=katg)
+        rejestr.append(ramka_tekstu(tekst, cx, cy, h, 0))
+
     for o in proj.odcinki:
         ia = nazwa_do_idx.get(o.studnia_a)
         ib = nazwa_do_idx.get(o.studnia_b)
@@ -258,77 +278,73 @@ def _rysuj_wymiary(msp, proj: Projekt) -> list:
         a = proj.studnie[ia]
         b = proj.studnie[ib]
         mx, my = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-        kat = math.degrees(math.atan2(b.y - a.y, b.x - a.x))
-        if kat > 90 or kat < -90:
-            kat += 180
-        rad = math.radians(kat)
-        nx, ny = math.sin(rad), -math.cos(rad)  # normalna do odcinka
+        katg = math.degrees(math.atan2(b.y - a.y, b.x - a.x))
+        if katg > 90 or katg < -90:
+            katg += 180
+        rad = math.radians(katg)
+        tx, ty = math.cos(rad), math.sin(rad)   # wzdłuż odcinka
+        nx, ny = math.sin(rad), -math.cos(rad)  # normalna
         odsun = WYMIAR_WYS * 1.4
-        tekst = _fmt(o.dlugosc_wt)
-        wx, wy = mx - nx * odsun, my - ny * odsun
-        _tekst_z_maska(msp, tekst, (wx, wy), WYMIAR_WYS, "wymiary", kat=kat)
-        # cyfra "1" (liczba kanałów) po drugiej stronie trasy
-        kx, ky = mx + nx * odsun, my + ny * odsun
-        _tekst_z_maska(msp, "1", (kx, ky), KANALY_WYS, "_liczba kanałów", kat=kat)
-        # zarejestruj bbox wymiaru i cyfry jako zajęte
-        zajete.append(Prostokat(wx, wy, szerokosc_tekstu(tekst, WYMIAR_WYS),
-                                WYMIAR_WYS * 1.4, kat))
-        zajete.append(Prostokat(kx, ky, szerokosc_tekstu("1", KANALY_WYS),
-                                KANALY_WYS * 1.4, kat))
-    return zajete
+        # wymiar nad linią, cyfra kanałów pod linią (przeciwna normalna)
+        umiesc(_fmt(o.dlugosc_wt), mx, my, -nx, -ny, tx, ty, odsun, WYMIAR_WYS, "wymiary")
+        umiesc("1", mx, my, nx, ny, tx, ty, odsun, KANALY_WYS, "_liczba kanałów")
 
 
-def _rysuj_numery(msp, proj: Projekt, zajete_wymiary: list) -> list:
+def _rysuj_numery(msp, proj: Projekt, rejestr: list) -> None:
     """
-    Numer porządkowy w kółku po STRONIE POMARAŃCZOWEJ linii, odsunięty tak,
-    by NIE zasłaniał wymiarów. Zwraca listę zajętych prostokątów (kółka).
+    Numer porządkowy w kółku po STRONIE POMARAŃCZOWEJ linii, umieszczany tak,
+    by NIE kolidował z żadnym zajętym obszarem (wspólny rejestr).
     """
-    from .etykiety import Prostokat, _koliduja
-    zajete = list(zajete_wymiary)
-    kolka = []
+    from .etykiety import Prostokat, _koliduja, ramka_tekstu
+    bok = NUMER_PROMIEN * 2 + 2 * 1.0  # kółko + margines 1 j
     for i, s in enumerate(proj.studnie):
         kat = _kat_trasy(proj, i)
-        sx, sy = _strona_offsetu(proj, i)  # strona pomarańczowej linii
-        # szukaj odsunięcia bez kolizji z wymiarami/innymi numerami
+        sx, sy = _strona_offsetu(proj, i)   # strona pomarańczowej linii
+        tx, ty = math.cos(math.radians(kat)), math.sin(math.radians(kat))
         umieszczono = None
-        for krok in range(1, 7):
-            ods = 3.0 + krok * (NUMER_PROMIEN * 1.6)
-            cx, cy = s.x + sx * ods, s.y + sy * ods
-            p = Prostokat(cx, cy, NUMER_PROMIEN * 2, NUMER_PROMIEN * 2)
-            if not any(_koliduja(p, q) for q in zajete):
-                umieszczono = (cx, cy, p)
+        for kp in range(0, 10):
+            ods = 3.0 + kp * (NUMER_PROMIEN * 1.4)
+            for kw in range(0, 7):
+                for zw in ((0,) if kw == 0 else (1, -1)):
+                    cx = s.x + sx * ods + tx * (kw * (NUMER_PROMIEN * 1.6) * zw)
+                    cy = s.y + sy * ods + ty * (kw * (NUMER_PROMIEN * 1.6) * zw)
+                    p = Prostokat(cx, cy, bok, bok, 0.0)
+                    if not any(_koliduja(p, q) for q in rejestr):
+                        umieszczono = (cx, cy, p)
+                        break
+                if umieszczono:
+                    break
+            if umieszczono:
                 break
         if umieszczono is None:
             cx, cy = s.x + sx * 3.0, s.y + sy * 3.0
-            p = Prostokat(cx, cy, NUMER_PROMIEN * 2, NUMER_PROMIEN * 2)
+            p = Prostokat(cx, cy, bok, bok, 0.0)
         else:
             cx, cy, p = umieszczono
-        zajete.append(p)
-        kolka.append(p)
+        rejestr.append(p)
         msp.add_circle((cx, cy), NUMER_PROMIEN, dxfattribs={"layer": "_liczba"})
         _tekst_z_maska(msp, str(s.nr), (cx, cy), NUMER_WYS, "_liczba", kat=kat)
-    return kolka
 
 
-def _rysuj_nazwy(msp, proj: Projekt, zajete: list) -> None:
+def _rysuj_nazwy(msp, proj: Projekt, rejestr: list) -> None:
     """
     Nazwy studni RÓWNOLEGLE do trasy, PO STRONIE PRZECIWNEJ niż pomarańczowa
-    linia offsetu. Z maską tła, unikaniem kolizji i leaderami gdy trzeba.
+    linia offsetu. Rozmieszczane z unikaniem kolizji (wspólny rejestr) i
+    leaderami, gdy etykieta musi być odsunięta dalej.
     """
     from .etykiety import Prostokat, rozmiesc_etykiety
 
-    przeszkody = list(zajete)
+    # punkty studni jako małe przeszkody (żeby nazwa nie siadała na znaczniku)
     for s in proj.studnie:
-        przeszkody.append(Prostokat(s.x, s.y, STUDNIA_BOK, STUDNIA_BOK))
+        rejestr.append(Prostokat(s.x, s.y, STUDNIA_BOK + 1.0, STUDNIA_BOK + 1.0))
 
-    # strona nazw = przeciwna do offsetu => preferuj znak ujemny normalnej
     def strona(i):
         sx, sy = _strona_offsetu(proj, i)
-        return (-sx, -sy)
+        return (-sx, -sy)  # przeciwna do offsetu
 
     rozmieszczenie = rozmiesc_etykiety(
         proj.studnie, lambda i: _kat_trasy(proj, i), NAZWA_WYS,
-        przeszkody, kierunek_fn=strona,
+        rejestr, kierunek_fn=strona,
     )
     for s, (tx, ty), kat, czy_leader in rozmieszczenie:
         if czy_leader:
@@ -448,9 +464,12 @@ def rysuj_zawartosc(msp, proj: Projekt) -> None:
     _rysuj_trase(msp, proj)
     _rysuj_studnie(msp, proj)
     _rysuj_odbite_linie(msp, proj)
-    zajete_wym = _rysuj_wymiary(msp, proj)
-    kolka = _rysuj_numery(msp, proj, zajete_wym)
-    _rysuj_nazwy(msp, proj, zajete_wym + kolka)
+    # wspólny rejestr zajętych obszarów — wszystkie opisy go współdzielą,
+    # dzięki czemu nic nie nachodzi na nic (wg pomysłu: ramka + rejestr + przesuwanie)
+    rejestr = []
+    _rysuj_wymiary(msp, proj, rejestr)
+    _rysuj_numery(msp, proj, rejestr)
+    _rysuj_nazwy(msp, proj, rejestr)
     _rysuj_zapasy_mufy(msp, proj)
 
 
