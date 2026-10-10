@@ -167,17 +167,61 @@ def _rysuj_studnie(msp, proj: Projekt) -> None:
 
 def _rysuj_odbite_linie(msp, proj: Projekt) -> None:
     """
-    Odbita linia 15 jednostek przy KAŻDEJ studni — pomarańczowa (ACI 30),
-    przerywana (warstwa 'kabel projektowany'), prostopadle do trasy.
-    To standardowy element rysunku (miejsce na przyszłe zapasy/mufy).
+    Pomarańczowa linia RÓWNOLEGŁA do CAŁEJ trasy, odsunięta o 15 jednostek
+    (offset całej polilinii) — przerywana (DASHED), kolor 30
+    (warstwa 'kabel projektowany'). Jedna ciągła linia wzdłuż całej trasy.
     """
-    for i, s in enumerate(proj.studnie):
-        off = _wektor_normalny(proj, i, dystans=TRASA_ODSUNIECIE)  # 15 j
-        bx, by = s.x + off[0], s.y + off[1]
+    pkty = [(s.x, s.y) for s in proj.studnie]
+    if len(pkty) < 2:
+        return
+    offset = _offset_polilinii(pkty, TRASA_ODSUNIECIE)  # 15 j
+    if len(offset) >= 2:
         msp.add_lwpolyline(
-            [(s.x, s.y), (bx, by)],
+            offset,
             dxfattribs={"layer": "kabel projektowany"},
         )
+
+
+def _offset_polilinii(pkty, dystans: float):
+    """
+    Oblicza polilinię równoległą (offset) do zadanej, odsuniętą o `dystans`
+    po jednej stronie. Dla każdego wierzchołka liczy normalną uśrednioną
+    z sąsiednich segmentów (gładkie załamania).
+    """
+    n = len(pkty)
+    out = []
+    for i in range(n):
+        # kierunki segmentów przyległych do wierzchołka i
+        if i == 0:
+            dx, dy = pkty[1][0] - pkty[0][0], pkty[1][1] - pkty[0][1]
+            nx, ny = _normalna(dx, dy)
+        elif i == n - 1:
+            dx, dy = pkty[-1][0] - pkty[-2][0], pkty[-1][1] - pkty[-2][1]
+            nx, ny = _normalna(dx, dy)
+        else:
+            # wierzchołek wewnętrzny: wektor dwusiecznej (mitra),
+            # długość skorygowana tak, by odstęp PROSTOPADŁY = dystans
+            n1 = _normalna(pkty[i][0] - pkty[i - 1][0], pkty[i][1] - pkty[i - 1][1])
+            n2 = _normalna(pkty[i + 1][0] - pkty[i][0], pkty[i + 1][1] - pkty[i][1])
+            mx, my = n1[0] + n2[0], n1[1] + n2[1]
+            d = math.hypot(mx, my)
+            if d < 1e-9:
+                nx, ny = n1
+            else:
+                mnx, mny = mx / d, my / d
+                # cos kąta między normalną segmentu a dwusieczną
+                cos_pol = n1[0] * mnx + n1[1] * mny
+                cos_pol = max(0.2, cos_pol)  # ogranicz wydłużenie w ostrych kątach
+                skala = 1.0 / cos_pol
+                nx, ny = mnx * skala, mny * skala
+        out.append((pkty[i][0] + nx * dystans, pkty[i][1] + ny * dystans))
+    return out
+
+
+def _normalna(dx: float, dy: float) -> tuple[float, float]:
+    """Jednostkowa normalna (obrót wektora o +90°)."""
+    d = math.hypot(dx, dy) or 1.0
+    return (-dy / d, dx / d)
 
 
 def _rysuj_numery(msp, proj: Projekt) -> None:
