@@ -35,8 +35,31 @@ Ramki „Zakończenie A/B" są rysowane **od zera** (nie kopiowane ze wzorca):
   wychodzi poza obramowanie;
 - „Zakończenie A" pojawia się tylko na pierwszym arkuszu, „Zakończenie B" tylko
   na ostatnim; na pozostałych arkuszach ramek nie ma;
+- położenie ramki jest **dobierane dynamicznie** tak, aby nie zasłaniała trasy,
+  opisów ani tabelek (strzałka trafia w skrajną studnię);
 - przy czyszczeniu arkusza usuwane są wszystkie **śmieci** ze wzorca (puste
-  ramki, osierocone strzałki MULTILEADER, odklejone bloki opisu kabla).
+  ramki, osierocone strzałki MULTILEADER, duplikaty pól leżące poza papierem).
+
+### Opis kabla (prawy-górny róg) — „tabelka górny róg.png"
+
+Ramka w prawym-górnym rogu zawiera 3 wiersze:
+1. `Proj. kabel <typ z WT pkt 1.4> - <numer warunków/nr kabla>`
+2. `dł. trasowa w kanalizacji Orange Polska S.A.: <X> m`
+3. `dł. montażowa w kanalizacji Orange Polska S.A.: <Y> m`
+Ramka jest dopasowywana do szerokości tekstu (bez zawijania).
+
+### Tabelka (prawy-dolny róg) na KAŻDYM arkuszu
+
+Skala (`1:1000`), opis rysunku (`PRZEBIEG PROJEKTOWANEJ TRASY`) oraz numer
+rysunku są **gwarantowane na każdym arkuszu** (rysowane od zera — klonowane
+arkusze potrafiły je gubić). Numer rysunku: **2.1, 2.2, 2.3, …** (kolejno).
+
+### Kontrola zasłaniania rzutni przez tabelki
+
+Tabelki (prawy-dolny i prawy-górny róg) nachodzą na rzutnię mapy. Aby po
+wydruku nie zginął żaden fragment projektu, środek rzutni jest dobierany tak,
+by **żadna studnia ani trasa nie wpadła pod tabelkę** (użyteczne okno jest
+pomniejszone o pasy tabelek, a środek dociskany do obszaru widocznego).
 
 ## Uruchamianie w Windows (pliki .bat)
 

@@ -70,16 +70,163 @@ def _wybierz_layout_wzorzec(doc):
     return best
 
 
-def _ustaw_rzutnie(layout, ark: Arkusz) -> None:
-    """Ustawia aktywną rzutnię (viewport mapy) na środek fragmentu trasy."""
+# --- obszary PAPIERU zasłonięte przez tabelki (mm); trasa nie może pod nie
+#     wchodzić, bo po wydruku byłaby niewidoczna ---
+#   tabelka główna (prawy-dolny róg):  x 256..394, y 0..40
+#   opis kabla      (prawy-górny róg): x 302..394, y 269..285
+_ZASLONIETE = [
+    (256.0, 0.0, 394.0, 40.0),      # (x0, y0, x1, y1) — tabelka główna
+    (288.0, 268.0, 394.0, 285.0),   # opis kabla (prawy-górny róg)
+]
+# obszar widoczny rzutni mapy na papierze [mm]
+_VP_OBSZAR = (0.0, 0.0, 394.0, 285.0)
+
+
+def _ustaw_rzutnie(layout, ark: Arkusz, proj: "Projekt | None" = None) -> None:
+    """
+    Ustawia aktywną rzutnię (viewport mapy). Domyślnie na środek fragmentu
+    trasy; jeśli przy tym środku jakikolwiek punkt trasy wypadłby POD tabelką
+    (prawy-dolny / prawy-górny róg), środek jest przesuwany tak, aby cała
+    widoczna trasa znalazła się w obszarze NIEzasłoniętym (kontrola widoczności
+    wydruku).
+    """
     vps = [v for v in layout.query("VIEWPORT")]
-    # pomijamy główny viewport paper space (id==1); bierzemy ten z największym view
     mapowe = [v for v in vps if getattr(v.dxf, "id", 1) != 1]
     if not mapowe:
         mapowe = vps
-    # viewport o największej powierzchni = główna rzutnia mapy
     glowny = max(mapowe, key=lambda v: getattr(v.dxf, "width", 0) * getattr(v.dxf, "height", 0))
-    glowny.dxf.view_center_point = (ark.center_x, ark.center_y, 0)
+
+    cx, cy = ark.center_x, ark.center_y
+    if proj is not None and ark.studnie_idx:
+        cx, cy = _dopasuj_srodek_bez_zaslon(proj, ark)
+        ark.center_x, ark.center_y = cx, cy  # by strzałki zakończeń liczyły się spójnie
+    glowny.dxf.view_center_point = (cx, cy, 0)
+
+
+def _dopasuj_srodek_bez_zaslon(proj: "Projekt", ark: Arkusz) -> tuple[float, float]:
+    """
+    Dobiera środek widoku (view_center) tak, aby footprint trasy na papierze w
+    miarę możliwości NIE wchodził w rogi zasłonięte tabelkami
+    (prawy-dolny / prawy-górny). Przesuwa środek MINIMALNIE względem środka
+    bbox fragmentu — trasa „ucieka" z rogu w lewo i/lub w pionie, o ile się
+    mieści w obszarze rzutni. Transformacja papieru:
+        px = 197 + (mx - cx),  py = 142.5 + (my - cy).
+    """
+    s = proj.studnie
+    idxs = ark.studnie_idx
+    xs = [s[i].x for i in idxs]
+    ys = [s[i].y for i in idxs]
+    # mały zapas (połowa odsunięcia pomarańczowej linii) — kontrola zasłon
+    # obejmuje głównie czarną trasę + węzły; pełne 15 m powiększałoby footprint
+    # ponad obszar czysty i psuło dobór środka, więc stosujemy łagodny bufor.
+    OFF = dxf_model.TRASA_ODSUNIECIE * 0.4
+    minx, maxx = min(xs) - OFF, max(xs) + OFF
+    miny, maxy = min(ys) - OFF, max(ys) + OFF
+    cx = (minx + maxx) / 2.0
+    cy = (miny + maxy) / 2.0
+
+    PX, PY = _VP_CENTER_PAPER
+    VX0, VY0, VX1, VY1 = _VP_OBSZAR
+    MARG = 5.0  # trzymaj trasę kawałek od krawędzi rzutni
+
+    w = maxx - minx   # szerokość footprintu trasy [m == mm na papierze]
+    h = maxy - miny   # wysokość
+
+    def bbox_paper(cx, cy):
+        return (PX + (minx - cx), PY + (miny - cy),
+                PX + (maxx - cx), PY + (maxy - cy))
+
+    def koliduje(bb):
+        bx0, by0, bx1, by1 = bb
+        for zx0, zy0, zx1, zy1 in _ZASLONIETE:
+            if not (bx1 <= zx0 or bx0 >= zx1 or by1 <= zy0 or by0 >= zy1):
+                return True
+        return False
+
+    # Zbuduj listę docelowych PRZEDZIAŁÓW papieru dla lewej krawędzi footprintu
+    # (bx0) i dolnej (by0), preferując:
+    #   1) całą trasę na LEWO od tabelek (prawa krawędź px <= 254),
+    #   2) jeśli za szeroka — w PIONOWYM pasie między tabelkami (y 45..266).
+    # Dla każdej opcji wyznaczamy (cx,cy) i sprawdzamy brak kolizji + mieszczenie.
+    kandydaci = []
+
+    # opcja 1: wyśrodkuj w pionie, dosuń w lewo tak, by px(max) <= 254
+    #   px(max) = PX + (maxx - cx) <= 254  =>  cx >= maxx - (254 - PX)
+    cx1 = maxx - (254.0 - PX)
+    cy1 = cy                      # pion jak natura
+    kandydaci.append((cx1, cy1))
+
+    # opcja 2: zostaw poziomo jak natura, ale wepchnij w pas pionowy 45..266:
+    #   chcemy by0 >= 45 i by1 <= 266
+    #   by0 = PY + (miny - cy) ; by1 = PY + (maxy - cy)
+    cy2 = PY + maxy - 266.0 + MARG      # by1 = 266-MARG
+    kandydaci.append((cx, cy2))
+    cy2b = PY + miny - 45.0 - MARG      # by0 = 45+MARG
+    kandydaci.append((cx, cy2b))
+
+    # opcja 3: kombinacja — lewo + pas pionowy
+    kandydaci.append((cx1, cy2))
+    kandydaci.append((cx1, cy2b))
+
+    # opcja 0: natura (gdy nic nie zasłania)
+    kandydaci.insert(0, (cx, cy))
+
+    def dociag_do_vp(cx, cy):
+        bx0, by0, bx1, by1 = bbox_paper(cx, cy)
+        if bx0 < VX0 + MARG:
+            cx += (bx0 - (VX0 + MARG))
+        if bx1 > VX1 - MARG:
+            cx += (bx1 - (VX1 - MARG))
+        if by0 < VY0 + MARG:
+            cy += (by0 - (VY0 + MARG))
+        if by1 > VY1 - MARG:
+            cy += (by1 - (VY1 - MARG))
+        return cx, cy
+
+    # kara liczona na RZECZYWISTEJ trasie (czarna polilinia), nie na buforze —
+    # bufor służy tylko do preferencji, a o jakości decyduje realne zasłonięcie.
+    # Uwzględniamy CAŁĄ trasę (nie tylko węzły tego arkusza) — w oknie rzutni
+    # widać też sąsiednie odcinki (zakład), które też nie mogą wpaść pod tabelkę.
+    tp_model = [(ss.x, ss.y) for ss in s]
+
+    def kara_trasy(kx, ky):
+        """Liczba „zasłoniętych" próbek trasy WIDOCZNYCH w oknie przy (kx,ky)."""
+        import math
+        n = 0
+        for a in range(len(tp_model) - 1):
+            (ax, ay), (bx, by) = tp_model[a], tp_model[a + 1]
+            d = math.hypot(bx - ax, by - ay)
+            steps = max(1, int(d / 3.0))
+            for k in range(steps + 1):
+                t = k / steps
+                mx = ax + (bx - ax) * t
+                my = ay + (by - ay) * t
+                px = PX + (mx - kx)
+                py = PY + (my - ky)
+                # tylko to, co faktycznie widać w oknie rzutni
+                if not (VX0 <= px <= VX1 and VY0 <= py <= VY1):
+                    continue
+                for zx0, zy0, zx1, zy1 in _ZASLONIETE:
+                    if zx0 <= px <= zx1 and zy0 <= py <= zy1:
+                        n += 1
+                        break
+        return n
+
+    # wybierz pierwszego kandydata, dla którego trasa jest całkowicie odsłonięta;
+    # jeśli żaden — ten z NAJMNIEJSZĄ liczbą zasłoniętych próbek trasy
+    najlepszy = (cx, cy)
+    najlepszy_kara = kara_trasy(cx, cy)   # natura jako baseline
+    if najlepszy_kara == 0:
+        # sprawdź, czy natura mieści footprint w VP; i tak zwróć
+        return dociag_do_vp(cx, cy) if koliduje(bbox_paper(cx, cy)) else (cx, cy)
+    for kx, ky in kandydaci:
+        kx, ky = dociag_do_vp(kx, ky)
+        k = kara_trasy(kx, ky)
+        if k == 0:
+            return (kx, ky)
+        if k < najlepszy_kara:
+            najlepszy_kara, najlepszy = k, (kx, ky)
+    return najlepszy
 
 
 def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz,
@@ -97,10 +244,27 @@ def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz,
     """
     import re
     d = proj.dane
-    nr_rys = d.rys_nr or f"{ark.numer}"
+    # numer rysunku: 2.1, 2.2, 2.3 ... (bazowy człon "2" + numer arkusza)
+    nr_rys = _numer_rysunku(ark.numer)
+    dl_tras = _fmt_pl(proj.dlugosc_trasowa())
+    dl_mont = _fmt_pl(proj.dlugosc_montazowa())
 
+    off_do_usuniecia = []
     for e in layout.query("MTEXT"):
         txt = e.text
+
+        # --- usuń duplikaty pól tabelki/opisów leżące POZA papierem A3
+        #     (wzorzec ma po 3 kopie "2.1"/"1:1000"/"PRZEBIEG..."/opis kabla —
+        #      zostawiamy tylko tę na arkuszu, resztę kasujemy jako śmieci) ---
+        if _poza_papierem(e):
+            off_do_usuniecia.append(e)
+            continue
+
+        # --- górny-prawy opis kabla (Proj. kabel + dł. trasowa + montażowa) ---
+        if "Proj." in txt and "dł. trasowa" in txt.lower():
+            e.text = _zbuduj_opis_kabla(txt, d, dl_tras, dl_mont)
+            _dopasuj_opis_kabla(layout, e, d, dl_tras, dl_mont)
+            continue
 
         # --- nr rysunku (duży tekst "2.1") ---
         if re.fullmatch(r"\d+(\.\d+)*", txt.strip()) and e.dxf.char_height >= 3.5:
@@ -143,6 +307,183 @@ def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz,
             if d.nr_kabla:
                 e.text = d.nr_kabla
             continue
+
+    # skasuj duplikaty leżące poza papierem (śmieci wzorca)
+    for e in off_do_usuniecia:
+        try:
+            layout.delete_entity(e)
+        except Exception:
+            pass
+
+    # GWARANCJA: Skala / opis rysunku / nr rysunku na KAŻDYM arkuszu
+    # (klonowane arkusze potrafią „zgubić" te pola — rysujemy je pewnie od zera)
+    _zapewnij_pola_rysunku(layout, nr_rys)
+
+    # usuń pozostałe (nietekstowe) śmieci wzorca leżące poza papierem A3
+    for e in list(layout):
+        if e.dxftype() == "MTEXT":
+            continue
+        if _poza_papierem(e):
+            try:
+                layout.delete_entity(e)
+            except Exception:
+                pass
+
+
+def _numer_rysunku(numer_arkusza: int) -> str:
+    """Numer rysunku: 2.1, 2.2, 2.3 ... (człon główny „2" + numer arkusza)."""
+    return f"2.{numer_arkusza}"
+
+
+# pozycje pól tabelki ze wzorca zab2.dxf (prawy-dolny róg), [mm papieru]
+_POLE_SKALA = (344.25, 11.825, 1.8, "wymiarowanie", 5)        # (x,y,h,warstwa,attach)
+_POLE_OPIS = (348.824, 3.970, 1.8, "wymiarowanie", 5)
+_POLE_NR = (382.607, 9.049, 4.0, "Otworówka", 1)
+_OPIS_RYS = "\\pxi9;PRZEBIEG PROJEKTOWANEJ TRASY"
+
+
+def _zapewnij_pola_rysunku(layout, nr_rys: str) -> None:
+    """
+    Gwarantuje obecność na arkuszu trzech pól tabelki, które na klonowanych
+    arkuszach bywają gubione: Skala (1:1000), opis rysunku (PRZEBIEG
+    PROJEKTOWANEJ TRASY) oraz numer rysunku (2.x). Najpierw usuwa istniejące
+    kopie na arkuszu, potem rysuje je od zera (styl Arial), aby zawsze były
+    widoczne i spójne.
+    """
+    # usuń istniejące (na-arkuszowe) kopie tych pól
+    do_usun = []
+    for e in layout.query("MTEXT"):
+        txt = e.text.strip()
+        x, y = e.dxf.insert[0], e.dxf.insert[1]
+        if not (250 <= x <= 420 and -5 <= y <= 45):
+            continue
+        if txt == "1:1000" or "PRZEBIEG PROJEKTOWANEJ TRASY" in txt:
+            do_usun.append(e)
+        elif e.dxf.char_height >= 3.5 and _wyglada_jak_nr(txt):
+            do_usun.append(e)
+    for e in do_usun:
+        try:
+            layout.delete_entity(e)
+        except Exception:
+            pass
+
+    # narysuj od zera
+    def dodaj(tekst, param):
+        x, y, h, warstwa, attach = param
+        mt = layout.add_mtext(tekst, dxfattribs={"layer": warstwa,
+                                                 "style": dxf_model.STYL_ARIAL})
+        mt.dxf.char_height = h
+        mt.set_location((x, y), attachment_point=attach)
+        return mt
+
+    dodaj("1:1000", _POLE_SKALA)
+    dodaj(_OPIS_RYS, _POLE_OPIS)
+    dodaj(nr_rys, _POLE_NR)
+
+
+def _wyglada_jak_nr(txt: str) -> bool:
+    import re
+    return bool(re.fullmatch(r"\d+(\.\d+)*", txt))
+
+
+def _poza_papierem(e) -> bool:
+    """
+    True, gdy encja leży (praktycznie w całości) POZA obszarem papieru A3
+    (0..420 × 0..297 mm) — czyli jest „śmieciem" wzorca do skasowania.
+    Dla MTEXT bierzemy punkt wstawienia; dla linii/polilinii — wszystkie
+    wierzchołki; z marginesem tolerancji.
+    """
+    MARG = 5.0
+    def poza(x, y):
+        return x < -MARG or x > 420 + MARG or y < -MARG or y > 297 + MARG
+    t = e.dxftype()
+    try:
+        if t == "MTEXT":
+            p = e.dxf.insert
+            return poza(p[0], p[1])
+        if t == "LWPOLYLINE":
+            pts = list(e.get_points("xy"))
+            return bool(pts) and all(poza(x, y) for x, y in pts)
+        if t == "LINE":
+            s, en = e.dxf.start, e.dxf.end
+            return poza(s[0], s[1]) and poza(en[0], en[1])
+        if t == "MULTILEADER":
+            try:
+                bp = e.context.base_point
+                return poza(bp[0], bp[1])
+            except Exception:
+                return False
+        if t == "SOLID":
+            v = e.dxf.vtx0
+            return poza(v[0], v[1])
+        if t == "HATCH":
+            return False  # hatche tabelki zostawiamy
+    except Exception:
+        return False
+    return False
+
+
+def _zbuduj_opis_kabla(oryg: str, d, dl_tras: str, dl_mont: str) -> str:
+    """
+    Górny-prawy opis kabla (wg „tabelka górny róg.png"):
+      wiersz 1: Proj. kabel <typ z WT 1.4> - <numer warunków/nr kabla>
+      wiersz 2: dł. trasowa w kanalizacji Orange Polska S.A.: <X> m
+      wiersz 3: dł. montażowa w kanalizacji Orange Polska S.A.: <Y> m
+    Zachowuje prefiks akapitu wzorca (\\pxi...) i formatowanie \\T, jeśli były.
+    """
+    typ = d.typ_kabla or "Z-XOTKtsd"
+    nrk = d.nr_kabla or ""
+    srednica = f" Ø {d.srednica_kabla} mm" if d.srednica_kabla else ""
+    # bez kodu tabulatora \I (renderował się dosłownie jako „\Ikabel");
+    # bez skalowania \T, żeby tekst nie był szerszy niż ramka
+    return (
+        f"Proj. kabel {typ}{srednica} - {nrk}"
+        f"\\Pdł. trasowa w kanalizacji Orange Polska S.A.: {dl_tras} m"
+        f"\\Pdł. montażowa w kanalizacji Orange Polska S.A.: {dl_mont} m"
+    )
+
+
+def _dopasuj_opis_kabla(layout, mt, d, dl_tras: str, dl_mont: str) -> None:
+    """
+    Dopasowuje ramkę (prostokąt) górnego-prawego opisu kabla do tekstu i ustawia
+    szerokość kolumny MTEXT, aby tekst się mieścił i nie zawijał poza ramkę.
+    Ramka jest przyklejona do GÓRNEJ i PRAWEJ krawędzi rzutni (y=285, x=394).
+    """
+    h = 2.5
+    typ = d.typ_kabla or "Z-XOTKtsd"
+    nrk = d.nr_kabla or ""
+    srednica = f" Ø {d.srednica_kabla} mm" if d.srednica_kabla else ""
+    linie = [
+        f"Proj. kabel {typ}{srednica} - {nrk}",
+        f"dł. trasowa w kanalizacji Orange Polska S.A.: {dl_tras} m",
+        f"dł. montażowa w kanalizacji Orange Polska S.A.: {dl_mont} m",
+    ]
+    szer_txt = max(_szerokosc_linii(t, h) for t in linie)
+    pad = 2.0
+    szer_ramki = szer_txt + 2 * pad
+    wys_ramki = (len(linie) - 1) * INTERLINIA * h + h + 2 * pad
+
+    # prawy-górny róg ramki = (394, 285) (krawędź rzutni)
+    px, gy = 394.0, 285.0
+    lx = px - szer_ramki
+    dy = gy - wys_ramki
+
+    # ustaw MTEXT: lewy-górny róg + padding, kolumna = szer_txt (bez zawijania)
+    mt.dxf.char_height = h
+    mt.dxf.width = szer_txt + 0.5
+    mt.set_location((lx + pad, gy - pad), attachment_point=1)  # TOP_LEFT
+
+    # znajdź i przeskaluj prostokąt ramki (LWPOLYLINE layer 0 obejmujący stary box)
+    for e in list(layout.query("LWPOLYLINE")):
+        if not e.closed:
+            continue
+        pts = [(p[0], p[1]) for p in e.get_points("xy")]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        # stary górny-prawy box: przy prawej-górnej krawędzi
+        if max(xs) >= 390 and max(ys) >= 283 and min(ys) >= 260:
+            e.set_points([(lx, dy), (px, dy), (px, gy), (lx, gy)], format="xy")
+            break
 
 
 def _fmt_pl(v: float) -> str:
@@ -297,11 +638,15 @@ def _rysuj_ramke_zakonczenia(layout, proj: Projekt, ark: Arkusz, strona: str,
     szer_ramki = szer_tekstu + 2 * PAD_RAMKI
     wys_ramki = wys_tekstu + 2 * PAD_RAMKI
 
-    # lewy-górny róg ramki
-    if kotwica is None:
-        lx, gy = (38.1, 223.9) if strona == "A" else (31.0, 60.3)
-    else:
+    cel = _studnia_terminala_papier(proj, ark, strona)
+
+    # --- DOBÓR POŁOŻENIA ramki: nie może zasłaniać trasy/opisów ani tabelek;
+    #     wybieramy pozycję najbliższą „ładnej" domyślnej, z której strzałka
+    #     dobrze trafia w skrajną studnię ---
+    if kotwica is not None:
         lx, gy = kotwica
+    else:
+        lx, gy = _dobierz_pozycje_ramki(proj, ark, strona, szer_ramki, wys_ramki, cel)
     # prawy-dolny róg
     px = lx + szer_ramki
     dy = gy - wys_ramki
@@ -334,9 +679,93 @@ def _rysuj_ramke_zakonczenia(layout, proj: Projekt, ark: Arkusz, strona: str,
     mt.set_location((lx + PAD_RAMKI, gy - PAD_RAMKI), attachment_point=1)  # TOP_LEFT
 
     # --- strzałka do skrajnej studni ---
-    cel = _studnia_terminala_papier(proj, ark, strona)
     if cel is not None:
         _rysuj_strzalke(layout, (lx, dy, px, gy), cel)
+
+
+def _trasa_papier(proj: Projekt, ark: Arkusz):
+    """Punkty trasy fragmentu arkusza w układzie papieru [mm]."""
+    PX, PY = _VP_CENTER_PAPER
+    pts = []
+    for i in ark.studnie_idx:
+        s = proj.studnie[i]
+        pts.append((PX + (s.x - ark.center_x), PY + (s.y - ark.center_y)))
+    return pts
+
+
+def _koliduje_prost(box, other, margines=1.0) -> bool:
+    """Kolizja dwóch prostokątów AABB (x0,y0,x1,y1) z marginesem."""
+    ax0, ay0, ax1, ay1 = box
+    bx0, by0, bx1, by1 = other
+    return not (ax1 + margines <= bx0 or ax0 - margines >= bx1 or
+                ay1 + margines <= by0 or ay0 - margines >= by1)
+
+
+def _odcinek_prostokat(p, q, bok=2.0):
+    """Przybliża odcinek p-q siatką małych prostokątów (do testu kolizji)."""
+    import math
+    (x0, y0), (x1, y1) = p, q
+    d = math.hypot(x1 - x0, y1 - y0)
+    n = max(1, int(d / bok))
+    out = []
+    for k in range(n + 1):
+        t = k / n
+        cx = x0 + (x1 - x0) * t
+        cy = y0 + (y1 - y0) * t
+        out.append((cx - bok, cy - bok, cx + bok, cy + bok))
+    return out
+
+
+def _dobierz_pozycje_ramki(proj: Projekt, ark: Arkusz, strona: str,
+                           szer: float, wys: float, cel) -> tuple[float, float]:
+    """
+    Dobiera lewy-górny róg ramki zakończenia tak, aby prostokąt ramki:
+      - mieścił się na papierze (z marginesem),
+      - NIE nachodził na trasę, tabelki ani opis górny-prawy,
+      - leżał możliwie blisko skrajnej studni (ładny, krótki leader).
+    Zwraca (lx, gy). Gdy nic nie pasuje — pozycja domyślna (fallback).
+    """
+    VX0, VY0, VX1, VY1 = _VP_OBSZAR
+    MARG = 6.0
+
+    # przeszkody: tabelki + punkty/odcinki trasy
+    przeszkody = list(_ZASLONIETE)
+    tp = _trasa_papier(proj, ark)
+    for i in range(len(tp)):
+        przeszkody.append((tp[i][0] - 2, tp[i][1] - 2, tp[i][0] + 2, tp[i][1] + 2))
+        if i + 1 < len(tp):
+            przeszkody.extend(_odcinek_prostokat(tp[i], tp[i + 1]))
+
+    # punkt docelowy (skrajna studnia) — chcemy ramkę blisko niego, ale nie na trasie
+    tx, ty = cel if cel else (_VP_CENTER_PAPER)
+
+    # kandydaci: siatka lewych-górnych rogów po całym obszarze rzutni
+    kand = []
+    x = VX0 + MARG
+    while x + szer <= VX1 - MARG:
+        y = VY1 - MARG
+        while y - wys >= VY0 + MARG:
+            kand.append((x, y))
+            y -= 8.0
+        x += 10.0
+
+    najlepszy = None
+    najlepszy_koszt = None
+    for lx, gy in kand:
+        box = (lx, gy - wys, lx + szer, gy)
+        if any(_koliduje_prost(box, o) for o in przeszkody):
+            continue
+        # koszt = odległość środka ramki od celu (krótki, czytelny leader)
+        cxb = lx + szer / 2.0
+        cyb = gy - wys / 2.0
+        koszt = (cxb - tx) ** 2 + (cyb - ty) ** 2
+        if najlepszy_koszt is None or koszt < najlepszy_koszt:
+            najlepszy_koszt, najlepszy = koszt, (lx, gy)
+
+    if najlepszy is not None:
+        return najlepszy
+    # fallback: domyślny róg (lewy-górny / lewy-dolny), byle na papierze
+    return (38.1, 223.9) if strona == "A" else (31.0, 60.3)
 
 
 def _rysuj_strzalke(layout, ramka_box, cel) -> None:
@@ -408,10 +837,9 @@ def _usun_smieci_ramek(layout) -> None:
             if "Zakończenie" in txt or "Zakonczenie" in txt:
                 do_usuniecia.append(e)
                 continue
-            # osierocony opis kabla wzorca (blok 'Proj.\Ikabel ... dł. trasowa')
-            if "Proj." in txt and "dł. trasowa" in txt:
-                do_usuniecia.append(e)
-                continue
+            # UWAGA: górny-prawy opis kabla ('Proj. ... dł. trasowa ...') na
+            # arkuszu ZOSTAJE — jest potrzebny (uzupełniany w _podmien_pole_tabelki).
+            # Jego duplikaty poza papierem skasowano już wcześniej (_poza_papierem).
     for e in do_usuniecia:
         try:
             layout.delete_entity(e)
@@ -471,7 +899,7 @@ def generuj_z_szablonu(
         else:
             layout = _klonuj_layout(doc, bazowy, f"Arkusz {ark.numer}")
 
-        _ustaw_rzutnie(layout, ark)
+        _ustaw_rzutnie(layout, ark, proj)
         _podmien_pole_tabelki(layout, proj, ark, jest_pierwszy, jest_ostatni)
 
         # najpierw USUŃ wszystkie wzorcowe ramki zakończeń + śmieci,

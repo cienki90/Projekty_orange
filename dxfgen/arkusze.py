@@ -41,6 +41,18 @@ OKNO_H_M = VP_H_MM / 1000.0 * SKALA   # 285 m
 # margines bezpieczeństwa wewnątrz okna (żeby opisy nie wychodziły poza ramkę)
 MARGINES_TERENU = 20.0  # m z każdej strony
 
+# Pas prawej strony papieru zajęty przez tabelki (główna prawy-dół + opis kabla
+# prawy-góra). Trasa nie może pod nie wchodzić, więc ZMNIEJSZAMY użyteczną
+# szerokość/wysokość okna o te pasy — dzięki temu fragment trasy mieści się w
+# obszarze „czystym" i da się go odsunąć od tabelek bez chowania pod wydrukiem.
+#   tabelka główna:  szer ~138 mm (x 256..394), wys 40 mm (y 0..40)
+#   opis kabla:      wys ~17 mm (y 268..285), prawy-górny róg
+# Konserwatywnie rezerwujemy pionowy pas 45 mm (dół) + 20 mm (góra) = 65 m
+# wysokości oraz 10 m zapasu — tak, by przy wyśrodkowaniu trasa trafiała w
+# wolny obszar, a _dopasuj_srodek_bez_zaslon dopchnął resztę.
+REZERWA_TABELKI_V = 65.0   # m (wysokość) rezerwowana na pasy tabelek
+REZERWA_TABELKI_H = 20.0   # m (szerokość) dodatkowego zapasu
+
 
 @dataclass
 class Arkusz:
@@ -76,8 +88,10 @@ def podziel_na_arkusze(
     if not s:
         return []
 
-    okno_w = OKNO_W_M - 2 * MARGINES_TERENU
-    okno_h = OKNO_H_M - 2 * MARGINES_TERENU
+    # użyteczne okno = pełne okno minus marginesy ORAZ minus pasy tabelek
+    # (żeby fragment dał się odsunąć od zasłoniętych rogów przy wydruku)
+    okno_w = OKNO_W_M - 2 * MARGINES_TERENU - REZERWA_TABELKI_H
+    okno_h = OKNO_H_M - 2 * MARGINES_TERENU - REZERWA_TABELKI_V
     # promień okna jako koło wpisane (konserwatywnie — niezależnie od kierunku trasy)
     maks_rozpietosc = min(okno_w, okno_h)
 
