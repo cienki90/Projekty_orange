@@ -143,6 +143,12 @@ w GUI zaznacz „Generuj opis techniczny"). Plik powstaje obok DXF jako
 
 > Projektant i nr uprawnień są spójne na rysunku (tabelka) i w opisie.
 
+> **Styl 1:1 jak wzorzec.** Opis powstaje przez otwarcie wzorca `OT 339.docx`
+> i podmianę WYŁĄCZNIE danych — dzięki temu styl (czcionki Lato, nagłówki,
+> sekcje, marginesy, treść stała: uzgodnienia, normy, oświadczenie) jest
+> dokładnie taki sam jak w przykładzie. Plik `OT 339.docx` musi znajdować się
+> w katalogu z danymi (obok `wt.xls`).
+
 ## Uruchamianie w Windows (pliki .bat)
 
 Najprościej — dwuklik kolejno:

@@ -28,8 +28,11 @@
 - Kolor pomarańczowy = ACI 30 (warstwy Światłowód / kabel projektowany).
 
 ## Opis techniczny .docx (Etap 6)
-- Generowany przez `dxfgen/opis.py` (`generuj_opis_docx`) na wzór `OT 339.docx`;
-  dane łączone w `zbierz_dane_opisu` z WT (DaneProjektu) + rysunku (proj.zapasy,
+- Generowany przez `dxfgen/opis.py` (`generuj_opis_docx`) — styl 1:1 jak wzorzec:
+  otwiera `OT 339.docx` i podmienia TYLKO dane (podmiana na poziomie akapitu:
+  cały tekst w pierwszym runie, reszta runów czyszczona — zachowuje styl i
+  czcionkę). Wzorzec `OT 339.docx` musi być w katalogu z danymi.
+  Dane łączone w `zbierz_dane_opisu` z WT (DaneProjektu) + rysunku (proj.zapasy,
   zakończenia). Numery studni z mufą/zapasem i „wyjście HDPE" pochodzą z RYSUNKU.
 - Projektant (stały): **inż. Tomasz Waśko**, nr uprawnień **PDL/0137/PWOT/16**
   (nr członkowski POIIB: PDL/BT/0034/17). Ustawiany w `budowa.py`, wspólny dla
