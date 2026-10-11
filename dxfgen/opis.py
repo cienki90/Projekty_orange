@@ -134,7 +134,19 @@ def zbierz_dane_opisu(proj: Projekt) -> dict:
                               or _W["liczba_zapasow"]),
         "projektant": d.projektant or _W["projektant"],
         "nr_uprawnien": d.nr_uprawnien or _W["nr_uprawnien"],
+        "rok_budowy": _rok(d),
     }
+
+
+def _rok(d) -> str:
+    """Rok budowy z data_opisu / data_wt (szuka 4-cyfrowego roku)."""
+    import re
+    for zrodlo in (d.data_opisu, d.data_wt, d.data_rys):
+        if zrodlo:
+            m = re.search(r"(20\d{2})", zrodlo)
+            if m:
+                return m.group(1)
+    return "2022"
 
 
 def _czesc_adresu(adres: str, co: str) -> str:
@@ -200,6 +212,9 @@ def _podmien(par_text: str, w: dict, b: dict) -> str | None:
          f"studniach nr {b['nry_hdpe']} projektowane"),
         (f"- {w['liczba_muf']} szt", f"- {b['liczba_muf']} szt"),
         (f"-{w['liczba_zapasow']} m", f"-{b['liczba_zapasow']} m"),
+        # średnica kabla: „Ø 7 mm" -> „Ø <srednica> mm" (różne warianty odstępu)
+        (f"Ø {w['srednica']} mm", f"Ø {b['srednica']} mm"),
+        (f"Ø{w['srednica']}mm", f"Ø{b['srednica']}mm"),
     ]
     # najpierw najdłuższe wzorce
     pary.sort(key=lambda p: len(p[0]), reverse=True)
@@ -275,5 +290,104 @@ def generuj_opis_docx(proj: Projekt, sciezka_wyjscia: str,
             except Exception:
                 pass
 
+    # 4) WZÓR PRZYWIESZKI — podmiana osadzonego obrazka na wygenerowany z danymi WT
+    try:
+        _podmien_przywieszke(doc, b)
+    except Exception:
+        pass  # brak Pillow / brak obrazka — pomijamy, reszta opisu bez zmian
+
     doc.save(sciezka_wyjscia)
     return sciezka_wyjscia
+
+
+def _generuj_przywieszke_jpg(b: dict, sciezka: str, px_w: int, px_h: int) -> str:
+    """
+    Rysuje przywieszkę identyfikacyjną kabla (wzór z opisu) z danymi z WT:
+    TYP kabla (= Producent), Nr kabla, Właściciel, Wykonawca, Rok budowy.
+    Zwraca ścieżkę zapisanego PNG.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    W, H = max(px_w, 760), max(px_h, 420)
+    img = Image.new("RGB", (W, H), "#bcd4e6")  # jasnoniebieskie tło przywieszki
+    dr = ImageDraw.Draw(img)
+
+    def font(sz, bold=False):
+        kand = (["DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial_Bold.ttf"] if bold
+                else ["DejaVuSans.ttf", "arial.ttf", "Arial.ttf"])
+        for nm in kand:
+            try:
+                return ImageFont.truetype(nm, sz)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    # dwa „oczka" na otwory po bokach (poza białą ramką, by nie nachodziły na tekst)
+    r = int(H * 0.085)
+    cy = H // 2
+    ox = int(W * 0.055)
+    dr.ellipse([ox - r, cy - r, ox + r, cy + r], outline="black", width=3)
+    dr.ellipse([W - ox - r, cy - r, W - ox + r, cy + r], outline="black", width=3)
+
+    # biały obszar z opisem (między oczkami)
+    lx = int(W * 0.14)
+    rx = int(W * 0.86)
+    ty = int(H * 0.08)
+    by = int(H * 0.92)
+    dr.rectangle([lx, ty, rx, by], fill="white", outline="black", width=3)
+
+    x_lab = lx + int(W * 0.04)
+    x_val = lx + int((rx - lx) * 0.34)
+    s = int(H * 0.072)       # bazowy rozmiar fontu
+    y = ty + int(H * 0.04)
+    dr.text((x_lab, y), "UWAGA !", fill="black", font=font(s, True))
+    dr.text((x_val, y), "Kabel Światłowodowy", fill="black", font=font(s, True))
+    y += int(s * 2.1)
+    wiersze = [
+        ("TYP kabla:", b.get("typ_kabla", "")),
+        ("Nr kabla:", b.get("nr_warunkow", "")),
+        ("Właściciel:", b.get("operator", "")),
+        ("Wykonawca:", b.get("operator", "")),
+        ("Rok budowy:", b.get("rok_budowy", "")),
+        ("Nr umowy:", ""),
+    ]
+    krok = int((by - y - int(H * 0.03)) / len(wiersze))
+    for etykieta, wartosc in wiersze:
+        dr.text((x_lab, y), etykieta, fill="black", font=font(int(s * 0.82)))
+        dr.text((x_val, y), str(wartosc), fill="black", font=font(int(s * 0.92), True))
+        y += krok
+
+    img.save(sciezka, "PNG")
+    return sciezka
+
+
+def _podmien_przywieszke(doc, b: dict) -> None:
+    """
+    Zamienia bitmapę osadzoną w dokumencie (wzór przywieszki) na nową,
+    wygenerowaną z aktualnych danych WT — podmieniając dane części (image part)
+    w pliku .docx, z zachowaniem rozmiaru/pozycji w dokumencie.
+    """
+    import tempfile
+    shapes = doc.inline_shapes
+    if not shapes:
+        return
+    ish = shapes[0]
+    # rozmiar docelowy w px ~ z EMU (914400 EMU = 1 cal; ~96 dpi)
+    try:
+        px_w = max(480, int(ish.width / 914400 * 150))
+        px_h = max(240, int(ish.height / 914400 * 150))
+    except Exception:
+        px_w, px_h = 740, 400
+
+    tmp = os.path.join(tempfile.gettempdir(), "przywieszka_gen.png")
+    _generuj_przywieszke_jpg(b, tmp, px_w, px_h)
+
+    # znajdź część obrazu (image part) powiązaną z inline shape i podmień jej blob
+    try:
+        blip = ish._inline.graphic.graphicData.pic.blipFill.blip
+        rId = blip.embed
+        part = doc.part.related_parts[rId]
+        with open(tmp, "rb") as f:
+            part._blob = f.read()
+    except Exception:
+        pass

@@ -273,17 +273,31 @@ def _czytaj_formularz_1k(wb) -> DaneProjektu:
         if mb:
             dane.zakonczenie_b_opis = mb.group(1).strip()
 
-    # typ / średnica kabla — wiersz "Typ kabla/rury"
+    # typ / średnica kabla — wiersz "Typ kabla/rury" (WT pkt 1.4).
+    # WAŻNE (ustalenie z użytkownikiem): TYP KABLA = wartość w kolumnie
+    # „Producent", a ŚREDNICA = wartość w kolumnie „Średnica". Czytamy po
+    # ETYKIETACH (nie po kolejności kolumn), bo układ bywa różny w różnych WT.
     for r in range(sh.nrows):
-        if "typ kabla" in _komorka(sh, r, 0).lower():
-            for c in range(1, sh.ncols):
-                v = _komorka(sh, r, c)
-                if "Z-" in v or "XOTK" in v.upper():
-                    dane.typ_kabla = v
-                m = re.match(r"^\d+(\.\d+)?$", v)
-                if m and not dane.srednica_kabla and float(v) < 100:
-                    dane.srednica_kabla = v
-            break
+        if "typ kabla" not in _komorka(sh, r, 0).lower():
+            continue
+
+        def _wartosc_po_etykiecie(fragment: str) -> str:
+            """Pierwsza niepusta komórka na prawo od komórki z etykietą."""
+            for c in range(sh.ncols):
+                if fragment in _komorka(sh, r, c).lower():
+                    for cc in range(c + 1, sh.ncols):
+                        val = _komorka(sh, r, cc)
+                        if val:
+                            return val
+            return ""
+
+        prod = _wartosc_po_etykiecie("producent")
+        if prod:
+            dane.typ_kabla = prod
+        sred = _wartosc_po_etykiecie("średnica") or _wartosc_po_etykiecie("srednica")
+        if sred:
+            dane.srednica_kabla = sred.replace(",", ".")
+        break
 
     return dane
 
