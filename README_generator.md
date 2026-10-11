@@ -24,8 +24,11 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
       zapisywany jako JPG obok DXF i osadzany jako IMAGE pod trasą).
 - [x] **Etap 4** — GUI (PySide6): wczytywanie plików, lista studni +
       wskazywanie zapasów (SZ) / muf (ZR), metryka na żywo, generowanie w tle.
-- [ ] **Etap 5** — antykolizja opisów (przesuwanie + leadery) — ruszamy, gdy
-      na rysunku pojawiają się zapasy/mufy dodane w GUI.
+- [x] **Etap 5** — antykolizja opisów: WSZYSTKIE opisy model space (nazwy
+      studni, numery, wymiary, cyfry kanałów oraz symbole i ramki opisowe
+      zapasów/muf) współdzielą jeden rejestr OBB; kolidujące opisy są
+      przesuwane, a przy większym odsunięciu rysowany jest **leader** (linia
+      odniesienia). Ramki zakończeń dodatkowo omijają opisy SZ/ZR.
 
 ### Opisy zakończeń A/B (ramki)
 

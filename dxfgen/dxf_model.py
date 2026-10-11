@@ -21,7 +21,6 @@ from __future__ import annotations
 import math
 
 import ezdxf
-from ezdxf.enums import TextEntityAlignment
 
 from .model import Projekt, ReserveKind
 
@@ -109,8 +108,7 @@ def _utworz_blok_studni(doc) -> None:
     )
 
 
-def _tekst_z_maska(msp, tekst, pozycja, wysokosc, warstwa, kat=0.0,
-                   align=TextEntityAlignment.MIDDLE_CENTER):
+def _tekst_z_maska(msp, tekst, pozycja, wysokosc, warstwa, kat=0.0):
     """
     Dodaje MTEXT z MASKĄ TŁA (background fill), obrócony o `kat` stopni.
     Maska tła przesłania obiekty pod tekstem (trasa, kreski) — czytelność.
@@ -255,23 +253,23 @@ def _rysuj_wymiary(msp, proj: Projekt, rejestr: list) -> None:
     nazwa_do_idx = {s.nazwa: i for i, s in enumerate(proj.studnie)}
 
     def umiesc(tekst, mx, my, nx, ny, tx, ty, baza, h, warstwa):
-        """Znajdź wolne miejsce: rośnie odsunięcie prostopadłe + wzdłuż odcinka."""
+        """Znajdź wolne miejsce: rośnie odsunięcie prostopadłe + wzdłuż odcinka.
+        Test kolizji i zapis używają TEJ SAMEJ ramki OBB (obróconej o kąt tekstu)."""
         for kp in range(0, 8):
             ods = baza + kp * (h * 0.9)
             for kw in range(0, 5):
                 for zw in ((0,) if kw == 0 else (1, -1)):
                     cx = mx + nx * ods + tx * (kw * h * 1.1 * zw)
                     cy = my + ny * ods + ty * (kw * h * 1.1 * zw)
-                    r = ramka_tekstu(tekst, cx, cy, h, 0)  # bbox niezal. od obrotu dla testu
+                    r = ramka_tekstu(tekst, cx, cy, h, katg)  # OBB zgodny z obrotem
                     if not any(_koliduja(r, q) for q in rejestr):
                         _tekst_z_maska(msp, tekst, (cx, cy), h, warstwa, kat=katg)
-                        rejestr.append(ramka_tekstu(tekst, cx, cy, h,
-                                                    math.degrees(math.atan2(ty, tx))))
+                        rejestr.append(r)
                         return
         # ostateczność
         cx, cy = mx + nx * baza, my + ny * baza
         _tekst_z_maska(msp, tekst, (cx, cy), h, warstwa, kat=katg)
-        rejestr.append(ramka_tekstu(tekst, cx, cy, h, 0))
+        rejestr.append(ramka_tekstu(tekst, cx, cy, h, katg))
 
     for o in proj.odcinki:
         ia = nazwa_do_idx.get(o.studnia_a)
@@ -325,6 +323,9 @@ def _rysuj_numery(msp, proj: Projekt, rejestr: list) -> None:
         else:
             cx, cy, p = umieszczono
         rejestr.append(p)
+        # LEADER do studni, gdy numer został mocno odsunięty (czytelność)
+        if math.hypot(cx - s.x, cy - s.y) > NUMER_PROMIEN + 6.0:
+            msp.add_line((s.x, s.y), (cx, cy), dxfattribs={"layer": "_liczba"})
         msp.add_circle((cx, cy), NUMER_PROMIEN, dxfattribs={"layer": "_liczba"})
         _tekst_z_maska(msp, str(s.nr), (cx, cy), NUMER_WYS, "_liczba", kat=kat)
 
@@ -356,7 +357,7 @@ def _rysuj_nazwy(msp, proj: Projekt, rejestr: list) -> None:
         _tekst_z_maska(msp, s.nazwa, (tx, ty), NAZWA_WYS, "Nazwa studni", kat=kat)
 
 
-def _rysuj_zapasy_mufy(msp, proj: Projekt) -> None:
+def _rysuj_zapasy_mufy(msp, proj: Projekt, rejestr: list | None = None) -> None:
     """
     Zapasy (SZ) i mufy (ZR) rysowane NA pomarańczowej linii offsetu (15 j),
     zgodnie z wzorcami (zapas.png / mufa.png / zapas i mufa.png):
@@ -375,6 +376,8 @@ def _rysuj_zapasy_mufy(msp, proj: Projekt) -> None:
     """
     proj.przelicz_numery_zapasow()
     proj.pozycje_zapasow = {}
+    if rejestr is None:
+        rejestr = []
 
     # punkty pomarańczowej linii offsetu — symbol siada DOKŁADNIE na niej
     pkty = [(s.x, s.y) for s in proj.studnie]
@@ -402,11 +405,13 @@ def _rysuj_zapasy_mufy(msp, proj: Projekt) -> None:
         zmufy = [z for z in elementy if z.kind == ReserveKind.MUFA]
         nr_std = proj.studnie[idx].nr
 
-        _rysuj_symbol_grupy(msp, bx, by, kat, szapasy, zmufy, nr_std)
+        ramka_poz = _rysuj_symbol_grupy(msp, bx, by, kat, szapasy, zmufy,
+                                        nr_std, rejestr)
 
         proj.pozycje_zapasow[nazwa] = {
             "x": bx, "y": by, "kat": kat,
             "sz": bool(szapasy), "zr": bool(zmufy),
+            "ramka": ramka_poz,   # (cx, cy) środek ramki opisu (dla Etapu 5+)
         }
 
 
@@ -417,16 +422,28 @@ def _obrot(cx, cy, dx, dy, kat_deg):
     return (cx + dx * c - dy * s, cy + dx * s + dy * c)
 
 
-def _rysuj_symbol_grupy(msp, cx, cy, kat, szapasy, zmufy, nr_std) -> None:
+def _rysuj_symbol_grupy(msp, cx, cy, kat, szapasy, zmufy, nr_std,
+                        rejestr: list | None = None):
     """
     Rysuje symbol (kwadrat zapasu i/lub trójkąt mufy) + kółka z długościami +
     ramkę opisową, wszystko obrócone o `kat` (kierunek pomarańczowej linii).
     Lokalny układ: X wzdłuż linii, Y w poprzek; (0,0) = środek symbolu.
+
+    Rejestruje symbol jako przeszkodę w `rejestr` (żeby opisy go omijały) i
+    umieszcza ramkę opisu bezkolizyjnie (z leaderem, gdy trzeba ją odsunąć).
+    Zwraca (cx, cy) środka narysowanej ramki opisu.
     """
+    from .etykiety import Prostokat
+    if rejestr is None:
+        rejestr = []
     L = "kabel projektowany"      # pomarańczowy (ACI 30)
     ma_sz = bool(szapasy)
     ma_zr = bool(zmufy)
     h = ZAPAS_BOK / 2.0
+
+    # zarejestruj sam symbol (kwadrat/trójkąt) jako przeszkodę dla opisów
+    bok_sym = (ZAPAS_BOK if ma_sz else MUFA_BOK) + 2.0
+    rejestr.append(Prostokat(cx, cy, bok_sym, bok_sym, kat))
 
     # oznaczenia zapasów/muf rysujemy LINIĄ CIĄGŁĄ (warstwa 'kabel projektowany'
     # ma typ DASHED dla linii offsetu, więc tu wymuszamy 'Continuous')
@@ -473,36 +490,73 @@ def _rysuj_symbol_grupy(msp, cx, cy, kat, szapasy, zmufy, nr_std) -> None:
         ety.append("; ".join(z.etykieta for z in zmufy))
     wiersz1 = "; ".join(ety)                 # np. "SZ-2; ZR-2"
     wiersz2 = f"st. nr {nr_std}"             # dowiązanie do studni
-    _rysuj_ramke_opisu(msp, cx, cy, kat, h, wiersz1, wiersz2)
+    return _rysuj_ramke_opisu(msp, cx, cy, kat, h, wiersz1, wiersz2, rejestr)
 
 
-def _rysuj_ramke_opisu(msp, cx, cy, kat, h, wiersz1, wiersz2) -> None:
+def _rysuj_ramke_opisu(msp, cx, cy, kat, h, wiersz1, wiersz2,
+                       rejestr: list | None = None):
     """
-    Ramka opisowa NAD symbolem po stronie od trasy (lokalnie +Y): prostokąt
-    (obrys, warstwa 'obramowanie ramek') + dwa wiersze tekstu, obrócone o `kat`.
-    Rozmiar dobrany do dłuższego wiersza (żeby tekst się mieścił).
+    Ramka opisowa po stronie od trasy (lokalnie +Y) — z ANTYKOLIZJĄ: szuka
+    wolnego miejsca (rośnie odsunięcie od symbolu, próbuje też lekko w bok).
+    Gdy ramkę trzeba odsunąć dalej niż bazowo — rysuje LEADER (linię odniesienia)
+    od symbolu do ramki. Zwraca (cx, cy) środka ramki.
     """
+    from .etykiety import Prostokat, _koliduja
+    if rejestr is None:
+        rejestr = []
     hs = ZAP_OPIS_WYS
     maks_znakow = max(len(wiersz1), len(wiersz2), 1)
     szer = maks_znakow * 0.62 * hs + 2.5
     interlinia = 1.7 * hs
     wys = 2 * interlinia + 1.5
-    # dolna krawędź ramki tuż NAD kwadratem (lokalnie w górę o h + margines)
-    dy0 = h + 2.0           # dolna krawędź ramki (lokalnie, strona od trasy)
-    gy = dy0 + wys          # górna krawędź
-    cxl = -szer / 2.0
-    rogi = [(cxl, dy0), (cxl + szer, dy0), (cxl + szer, gy), (cxl, gy)]
+
+    baza = h + 2.0           # bazowe odsunięcie dolnej krawędzi od środka symbolu
+    wybrane = None
+    for kp in range(0, 7):                       # rośnie odsunięcie prostopadłe
+        dy0 = baza + kp * (wys * 0.5)
+        for bok in (0.0, szer * 0.7, -szer * 0.7):   # lekki ruch w bok
+            sc_x, sc_y = bok, dy0 + wys / 2.0        # środek ramki (lokalnie)
+            gx, gy = _obrot(cx, cy, sc_x, sc_y, kat)
+            prost = Prostokat(gx, gy, szer + 1.0, wys + 1.0, kat)
+            if not any(_koliduja(prost, q) for q in rejestr):
+                wybrane = (sc_x, dy0, prost, gx, gy, kp)
+                break
+        if wybrane:
+            break
+    if wybrane is None:
+        sc_x, dy0 = 0.0, baza
+        gx, gy = _obrot(cx, cy, sc_x, dy0 + wys / 2.0, kat)
+        prost = Prostokat(gx, gy, szer + 1.0, wys + 1.0, kat)
+        kp = 0
+    else:
+        sc_x, dy0, prost, gx, gy, kp = wybrane
+    rejestr.append(prost)
+
+    # LEADER od krawędzi symbolu do ramki, gdy ramka wyraźnie odsunięta
+    if kp > 0 or abs(sc_x) > 1e-6:
+        p_sym = _obrot(cx, cy, 0.0, h, kat)          # górna krawędź symbolu
+        p_ram = _obrot(cx, cy, sc_x, dy0, kat)       # dolna krawędź ramki
+        msp.add_lwpolyline(
+            [p_sym, p_ram],
+            dxfattribs={"layer": "obramowanie ramek", "linetype": "Continuous"},
+        )
+
+    # prostokąt ramki (lokalnie wokół sc_x, od dy0 do dy0+wys)
+    cxl = sc_x - szer / 2.0
+    gyl = dy0 + wys
+    rogi = [(cxl, dy0), (cxl + szer, dy0), (cxl + szer, gyl), (cxl, gyl)]
     msp.add_lwpolyline(
         [_obrot(cx, cy, dx, dy, kat) for dx, dy in rogi],
         close=True,
         dxfattribs={"layer": "obramowanie ramek", "linetype": "Continuous"},
     )
-    # dwa wiersze wyśrodkowane w pionie ramki (wiersz1 wyżej, wiersz2 niżej)
+    # dwa wiersze wyśrodkowane w pionie ramki
     ys = dy0 + wys / 2.0
     for txt, ly in ((wiersz1, ys + interlinia * 0.5),
                     (wiersz2, ys - interlinia * 0.5)):
-        px, py = _obrot(cx, cy, 0.0, ly, kat)
+        px, py = _obrot(cx, cy, sc_x, ly, kat)
         _tekst_z_maska(msp, txt, (px, py), hs, "obramowanie ramek", kat=kat)
+    return (gx, gy)
 
 
 # --- geometria pomocnicza ---
@@ -533,8 +587,11 @@ def _fmt(v: float) -> str:
 
 
 def _fmt_calk(v: float) -> str:
-    """Długość zapasu BEZ miejsc po przecinku (np. 15,0 -> '15')."""
-    return str(int(round(v)))
+    """Długość zapasu BEZ miejsc po przecinku; min. 1 dla niezerowych wartości."""
+    n = int(round(v))
+    if n == 0 and v > 0:
+        n = 1
+    return str(n)
 
 
 # --- API ---
@@ -568,10 +625,13 @@ def rysuj_zawartosc(msp, proj: Projekt) -> None:
     # wspólny rejestr zajętych obszarów — wszystkie opisy go współdzielą,
     # dzięki czemu nic nie nachodzi na nic (wg pomysłu: ramka + rejestr + przesuwanie)
     rejestr = []
+    # Zapasy/mufy NAJPIERW rejestrują swoje symbole jako przeszkody (są przypięte
+    # do linii offsetu i nie mogą się przesuwać), więc rysujemy je przed opisami,
+    # by numery/wymiary/nazwy je omijały. Etap 5: wszystko we WSPÓLNYM rejestrze.
+    _rysuj_zapasy_mufy(msp, proj, rejestr)
     _rysuj_wymiary(msp, proj, rejestr)
     _rysuj_numery(msp, proj, rejestr)
     _rysuj_nazwy(msp, proj, rejestr)
-    _rysuj_zapasy_mufy(msp, proj)
 
 
 def wstaw_podklad(doc, msp, osadzenie: dict) -> None:
@@ -607,8 +667,4 @@ def wstaw_podklad(doc, msp, osadzenie: dict) -> None:
     )
 
 
-def generuj_model_dxf(proj: Projekt, sciezka_wyjscia: str) -> str:
-    """Tworzy DXF tylko z model space (Etap 1). Zwraca ścieżkę pliku."""
-    doc = zbuduj_dokument(proj)
-    doc.saveas(sciezka_wyjscia)
-    return sciezka_wyjscia
+

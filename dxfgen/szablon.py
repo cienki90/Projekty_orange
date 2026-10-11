@@ -777,8 +777,10 @@ def _opisy_papier(layout, ark: Arkusz):
         msp = layout.doc.modelspace()
     except Exception:
         return []
+    # warstwy opisów + ramki/etykiety zapasów-muf ('obramowanie ramek'),
+    # by ramka zakończenia omijała także opisy SZ/ZR (Etap 5)
     warstwy = {"Nazwa studni", "_liczba", "_liczba kanałów", "wymiary",
-               "wymiarowanie"}
+               "wymiarowanie", "obramowanie ramek"}
     out = []
     for e in msp.query("MTEXT"):
         if e.dxf.layer not in warstwy:

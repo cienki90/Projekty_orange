@@ -27,6 +27,17 @@
 - Podkład: raster OSM w odcieniach szarości (program pobiera z internetu).
 - Kolor pomarańczowy = ACI 30 (warstwy Światłowód / kabel projektowany).
 
+## Antykolizja opisów (Etap 5)
+- Jeden WSPÓLNY rejestr OBB (etykiety.Prostokat + SAT) w `rysuj_zawartosc`
+  (dxf_model.py). Kolejność: zapasy/mufy (przypięte do offsetu — rejestrują się
+  jako przeszkody) -> wymiary -> numery -> nazwy. Każda funkcja dopisuje swoje
+  ramki i omija już zajęte.
+- Leadery (linia odniesienia) rysowane, gdy opis trzeba odsunąć: nazwy studni
+  (ods > 6 j), numery porządkowe (gdy odsunięte od studni), ramki opisowe SZ/ZR
+  (gdy nie mieszczą się tuż nad symbolem).
+- Ramki zakończeń (paper space) omijają też opisy SZ/ZR — `_opisy_papier`
+  uwzględnia warstwę 'obramowanie ramek'.
+
 ## Zapasy (SZ) i mufy (ZR) — wygląd (wzorce: zapas.png / mufa.png / zapas i mufa.png)
 - Symbole rysowane NA pomarańczowej linii offsetu (15 j), BEZ kreski łączącej
   z trasą; wszystko OBRÓCONE zgodnie z kierunkiem tej linii.
