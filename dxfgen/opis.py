@@ -124,7 +124,7 @@ def zbierz_dane_opisu(proj: Projekt) -> dict:
         "dl_trasowa": _fmt(proj.dlugosc_trasowa()),
         "dl_montazowa": _fmt_mont(proj.dlugosc_montazowa()),
         "nr_archiwalny": d.nr_archiwalny or _W["nr_archiwalny"],
-        "data_opisu": d.data_opisu or _W["data_opisu"],
+        "data_opisu": d.data_opisu or _data_opisu(d) or _W["data_opisu"],
         "miesiac_rozp": d.miesiac_rozpoczecia or _W["miesiac_rozp"],
         "nry_mufa_zapas": _lista_pl(nry_mz) if nry_mz else _W["nry_mufa_zapas"],
         "nry_hdpe": _lista_pl(hdpe) if hdpe else _W["nry_hdpe"],
@@ -150,7 +150,7 @@ def _rok(d) -> str:
 
 
 def _czesc_adresu(adres: str, co: str) -> str:
-    """Rozbija 'ul. Szachowa 1, 04-894 Warszawa' na ulicę / kod+miasto."""
+    """Rozbija 'ul. Szachowa 1, 04-894 Warszawa' na ulicę / kod+miasto / miasto."""
     if not adres:
         return ""
     czesci = [c.strip() for c in adres.split(",")]
@@ -159,7 +159,51 @@ def _czesc_adresu(adres: str, co: str) -> str:
         return s[3:].strip() if s.lower().startswith("ul.") else s
     if co == "kod":
         return czesci[1].upper() if len(czesci) > 1 else ""
+    if co == "miasto":
+        # z „04-894 WARSZAWA" wyłuskaj samą miejscowość (bez kodu pocztowego)
+        import re
+        kod = czesci[1] if len(czesci) > 1 else (czesci[0] if czesci else "")
+        m = re.sub(r"\d{2}-\d{3}", "", kod).strip()
+        return m.title() if m else ""
     return ""
+
+
+_MIESIACE = {
+    1: "styczeń", 2: "luty", 3: "marzec", 4: "kwiecień", 5: "maj", 6: "czerwiec",
+    7: "lipiec", 8: "sierpień", 9: "wrzesień", 10: "październik",
+    11: "listopad", 12: "grudzień",
+}
+
+
+def _rozbij_date(data: str) -> tuple[str, str]:
+    """Z „15-07-2022" / „2022-07-15" zwraca (miesiąc_słownie, rok)."""
+    import re
+    if not data:
+        return ("", "")
+    liczby = re.findall(r"\d+", data)
+    rok = ""
+    mies = None
+    for n in liczby:
+        if len(n) == 4:
+            rok = n
+        elif mies is None and 1 <= int(n) <= 12:
+            mies = int(n)
+    mstr = _MIESIACE.get(mies, "") if mies else ""
+    return (mstr, rok)
+
+
+def _data_opisu(d) -> str:
+    """
+    Buduje datę na stronie tytułowej:
+      '<miejscowość operatora>, <miesiąc warunków> <rok warunków> r.'
+    """
+    miasto = _czesc_adresu(d.adres_operatora, "miasto")
+    mies, rok = _rozbij_date(d.data_wt)
+    if miasto and mies and rok:
+        return f"{miasto}, {mies} {rok} r."
+    # fallback: cokolwiek sensownego
+    czesci = [c for c in (miasto, (f"{mies} {rok}".strip() + " r." if (mies or rok) else "")) if c]
+    return ", ".join(czesci)
 
 
 # --------------------------------------------------------------------------- #
@@ -308,11 +352,13 @@ def _generuj_przywieszke_jpg(b: dict, sciezka: str, px_w: int, px_h: int) -> str
     """
     from PIL import Image, ImageDraw, ImageFont
 
-    W, H = max(px_w, 760), max(px_h, 420)
-    img = Image.new("RGB", (W, H), "#bcd4e6")  # jasnoniebieskie tło przywieszki
+    W, H = max(px_w, 820), max(px_h, 440)
+    NIEBIESKI = "#bcd4e6"
+    img = Image.new("RGB", (W, H), NIEBIESKI)   # CAŁE tło niebieskie
     dr = ImageDraw.Draw(img)
 
     def font(sz, bold=False):
+        sz = max(8, int(sz))
         kand = (["DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial_Bold.ttf"] if bold
                 else ["DejaVuSans.ttf", "arial.ttf", "Arial.ttf"])
         for nm in kand:
@@ -322,39 +368,69 @@ def _generuj_przywieszke_jpg(b: dict, sciezka: str, px_w: int, px_h: int) -> str
                 continue
         return ImageFont.load_default()
 
-    # dwa „oczka" na otwory po bokach (poza białą ramką, by nie nachodziły na tekst)
-    r = int(H * 0.085)
+    def szer(txt, fnt):
+        try:
+            bb = dr.textbbox((0, 0), txt, font=fnt)
+            return bb[2] - bb[0]
+        except Exception:
+            return len(txt) * fnt.size * 0.6
+
+    # „oczka" na otwory po bokach (na niebieskim tle, poza białą ramką)
+    r = int(H * 0.075)
     cy = H // 2
-    ox = int(W * 0.055)
+    ox = int(W * 0.05)
     dr.ellipse([ox - r, cy - r, ox + r, cy + r], outline="black", width=3)
     dr.ellipse([W - ox - r, cy - r, W - ox + r, cy + r], outline="black", width=3)
 
-    # biały obszar z opisem (między oczkami)
-    lx = int(W * 0.14)
-    rx = int(W * 0.86)
-    ty = int(H * 0.08)
-    by = int(H * 0.92)
+    # biały obszar opisu — MIĘDZY oczkami (zostaw margines, by tekst nie nachodził)
+    lx = int(W * 0.135)
+    rx = int(W * 0.865)
+    ty = int(H * 0.07)
+    by = int(H * 0.93)
     dr.rectangle([lx, ty, rx, by], fill="white", outline="black", width=3)
 
-    x_lab = lx + int(W * 0.04)
-    x_val = lx + int((rx - lx) * 0.34)
-    s = int(H * 0.072)       # bazowy rozmiar fontu
-    y = ty + int(H * 0.04)
-    dr.text((x_lab, y), "UWAGA !", fill="black", font=font(s, True))
-    dr.text((x_val, y), "Kabel Światłowodowy", fill="black", font=font(s, True))
-    y += int(s * 2.1)
+    pad = int((rx - lx) * 0.04)
+    x_lab = lx + pad
     wiersze = [
         ("TYP kabla:", b.get("typ_kabla", "")),
         ("Nr kabla:", b.get("nr_warunkow", "")),
         ("Właściciel:", b.get("operator", "")),
         ("Wykonawca:", b.get("operator", "")),
-        ("Rok budowy:", b.get("rok_budowy", "")),
+        ("Rok budowy:", str(b.get("rok_budowy", ""))),
         ("Nr umowy:", ""),
     ]
-    krok = int((by - y - int(H * 0.03)) / len(wiersze))
+
+    # --- AUTODOBÓR rozmiaru fontu: tak, by najszersza linia „etykieta + wartość"
+    #     ZMIEŚCIŁA SIĘ w białej ramce (nic nie wychodzi poza obramowanie) ---
+    dost_szer = (rx - pad) - x_lab
+    s = int(H * 0.072)
+    for _ in range(40):
+        f_lab = font(int(s * 0.82))
+        f_val = font(int(s * 0.92), True)
+        kol_lab = max(szer(et, f_lab) for et, _ in wiersze) + int(s * 0.5)
+        maks = max(szer(str(w), f_val) for _, w in wiersze if w) if any(w for _, w in wiersze) else 0
+        naglowek = szer("UWAGA ! ", font(s, True)) + szer("Kabel Światłowodowy", font(s, True))
+        if (kol_lab + maks) <= dost_szer and naglowek <= dost_szer and s * 8.5 <= (by - ty):
+            break
+        s -= 1
+        if s <= 9:
+            break
+    f_lab = font(int(s * 0.82))
+    f_val = font(int(s * 0.92), True)
+    f_nag = font(s, True)
+    x_val = x_lab + kol_lab
+
+    # nagłówek
+    y = ty + int((by - ty) * 0.04)
+    dr.text((x_lab, y), "UWAGA !", fill="black", font=f_nag)
+    dr.text((x_lab + szer("UWAGA ! ", f_nag), y), "Kabel Światłowodowy",
+            fill="black", font=f_nag)
+    y += int(s * 1.9)
+    krok = int((by - y - int(H * 0.04)) / len(wiersze))
     for etykieta, wartosc in wiersze:
-        dr.text((x_lab, y), etykieta, fill="black", font=font(int(s * 0.82)))
-        dr.text((x_val, y), str(wartosc), fill="black", font=font(int(s * 0.92), True))
+        dr.text((x_lab, y), etykieta, fill="black", font=f_lab)
+        if wartosc:
+            dr.text((x_val, y), str(wartosc), fill="black", font=f_val)
         y += krok
 
     img.save(sciezka, "PNG")
