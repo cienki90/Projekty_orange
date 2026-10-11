@@ -31,9 +31,11 @@ ACI_CZARNY = 7              # trasa, opisy, numery (7 = czarny na białym tle)
 ACI_BIALY = 7
 STUDNIA_BOK = 1.2           # bok kwadratu studni [m]  (wzorzec: 1,2)
 NUMER_PROMIEN = 1.6         # promień kółka numeru porządkowego [m]  (wzorzec: ~1,6)
-TRASA_ODSUNIECIE = 15.0     # długość odbitej kreski (wzorzec: 15 jednostek)
-ZAPAS_BOK = 3.0             # bok prostokąta zapasu [m]
-MUFA_BOK = 3.0              # bok trójkąta mufy [m]
+TRASA_ODSUNIECIE = 15.0     # długość odbitej kreski / offsetu (wzorzec: 15 j)
+ZAPAS_BOK = 10.0            # bok KWADRATU zapasu [m]  (wzorzec: 10×10)
+MUFA_BOK = 6.0              # bok trójkąta mufy [m]
+ZAP_KOLKO_R = 1.6           # promień kółka z długością zapasu [m]
+ZAP_OPIS_WYS = 1.6          # wysokość tekstu ramki opisowej SZ/ZR [m]
 NAZWA_WYS = 1.6             # wysokość tekstu nazwy studni [m]  (wzorzec: 1,6)
 NUMER_WYS = 1.6             # wysokość tekstu numeru [m]        (wzorzec: 1,6)
 WYMIAR_WYS = 1.5            # wysokość tekstu wymiaru [m]       (zmniejszone na życzenie: 1,5)
@@ -356,58 +358,146 @@ def _rysuj_nazwy(msp, proj: Projekt, rejestr: list) -> None:
 
 def _rysuj_zapasy_mufy(msp, proj: Projekt) -> None:
     """
-    Zapasy (SZ) i mufy (ZR) na ODBITEJ KRESCE 15 j — pomarańczowej, przerywanej
-    (warstwa 'kabel projektowany'). Symbol na końcu kreski, etykieta z maską tła.
+    Zapasy (SZ) i mufy (ZR) rysowane NA pomarańczowej linii offsetu (15 j),
+    zgodnie z wzorcami (zapas.png / mufa.png / zapas i mufa.png):
+
+      - zapas (SZ): pomarańczowy KWADRAT 10×10 (obrys), w narożniku kółko z
+        długością zapasu BEZ miejsc po przecinku (np. „15"),
+      - mufa (ZR): pomarańczowy TRÓJKĄT (wypełniony),
+      - gdy przy jednej studni jest i SZ, i ZR — kwadrat + trójkąt w środku +
+        dwa kółka z długością,
+      - ramka opisowa (obrys, czarny tekst): „SZ-x;"/„ZR-x"/„SZ-x; ZR-x" oraz
+        drugi wiersz „st. nr <numer porządkowy studni>" (dowiązanie),
+      - BEZ kreski łączącej trasę z symbolem,
+      - wszystko OBRÓCONE zgodnie z kierunkiem pomarańczowej linii (styczna trasy).
+
+    Pozycje symboli zapamiętujemy w proj.pozycje_zapasow (przyda się w Etapie 5).
     """
     proj.przelicz_numery_zapasow()
+    proj.pozycje_zapasow = {}
+
+    # punkty pomarańczowej linii offsetu — symbol siada DOKŁADNIE na niej
+    pkty = [(s.x, s.y) for s in proj.studnie]
+    offset = _offset_polilinii(pkty, TRASA_ODSUNIECIE) if len(pkty) >= 2 else []
+
+    nazwa_do_idx = {s.nazwa: i for i, s in enumerate(proj.studnie)}
+
+    # grupuj elementy wg studni (żeby SZ i ZR przy tej samej studni były razem)
+    wg_studni: dict[str, list] = {}
     for z in proj.zapasy:
-        s = proj.studnia_po_nazwie(z.studnia)
-        if s is None:
+        wg_studni.setdefault(z.studnia, []).append(z)
+
+    for nazwa, elementy in wg_studni.items():
+        idx = nazwa_do_idx.get(nazwa)
+        if idx is None:
             continue
-        idx = next((i for i, ss in enumerate(proj.studnie) if ss.nazwa == z.studnia), 0)
-        off = _wektor_normalny(proj, idx, dystans=TRASA_ODSUNIECIE)  # 15 j
-        bx, by = s.x + off[0], s.y + off[1]
+        if offset and idx < len(offset):
+            bx, by = offset[idx]
+        else:
+            off = _wektor_normalny(proj, idx, dystans=TRASA_ODSUNIECIE)
+            bx, by = proj.studnie[idx].x + off[0], proj.studnie[idx].y + off[1]
         kat = _kat_trasy(proj, idx)
 
-        # odbita kreska 15 j — pomarańczowa przerywana (ltype/kolor z warstwy)
+        szapasy = [z for z in elementy if z.kind == ReserveKind.ZAPAS]
+        zmufy = [z for z in elementy if z.kind == ReserveKind.MUFA]
+        nr_std = proj.studnie[idx].nr
+
+        _rysuj_symbol_grupy(msp, bx, by, kat, szapasy, zmufy, nr_std)
+
+        proj.pozycje_zapasow[nazwa] = {
+            "x": bx, "y": by, "kat": kat,
+            "sz": bool(szapasy), "zr": bool(zmufy),
+        }
+
+
+def _obrot(cx, cy, dx, dy, kat_deg):
+    """Punkt (cx,cy) + wektor lokalny (dx,dy) obrócony o kat_deg [stopnie]."""
+    r = math.radians(kat_deg)
+    c, s = math.cos(r), math.sin(r)
+    return (cx + dx * c - dy * s, cy + dx * s + dy * c)
+
+
+def _rysuj_symbol_grupy(msp, cx, cy, kat, szapasy, zmufy, nr_std) -> None:
+    """
+    Rysuje symbol (kwadrat zapasu i/lub trójkąt mufy) + kółka z długościami +
+    ramkę opisową, wszystko obrócone o `kat` (kierunek pomarańczowej linii).
+    Lokalny układ: X wzdłuż linii, Y w poprzek; (0,0) = środek symbolu.
+    """
+    L = "kabel projektowany"      # pomarańczowy (ACI 30)
+    ma_sz = bool(szapasy)
+    ma_zr = bool(zmufy)
+    h = ZAPAS_BOK / 2.0
+
+    # --- KWADRAT zapasu 10×10 (obrys) ---
+    if ma_sz:
+        rogi = [(-h, -h), (h, -h), (h, h), (-h, h)]
         msp.add_lwpolyline(
-            [(s.x, s.y), (bx, by)],
-            dxfattribs={"layer": "kabel projektowany"},
+            [_obrot(cx, cy, dx, dy, kat) for dx, dy in rogi],
+            close=True, dxfattribs={"layer": L},
         )
 
-        if z.kind == ReserveKind.ZAPAS:
-            _symbol_zapas(msp, bx, by, z, kat)
+    # --- TRÓJKĄT mufy (wypełniony) ---
+    if ma_zr:
+        mh = MUFA_BOK / 2.0
+        # trójkąt skierowany „do góry" w lokalnym układzie
+        tp = [(0.0, mh), (-mh, -mh), (mh, -mh)]
+        p = [_obrot(cx, cy, dx, dy, kat) for dx, dy in tp]
+        msp.add_solid([p[0], p[1], p[2], p[2]], dxfattribs={"layer": L})
+
+    # --- kółka z długością zapasu (BEZ miejsc po przecinku) ---
+    # pozycje: pojedynczy SZ -> lewy-dolny róg kwadratu; SZ+ZR -> oba dolne rogi
+    pozycje_kolek = []
+    if ma_sz and ma_zr:
+        pozycje_kolek = [(-h * 0.55, -h * 0.55), (h * 0.55, -h * 0.55)]
+    elif ma_sz:
+        pozycje_kolek = [(-h * 0.6, -h * 0.6)]
+    for i, z in enumerate(szapasy):
+        if i < len(pozycje_kolek):
+            lx, ly = pozycje_kolek[i]
         else:
-            _symbol_mufa(msp, bx, by, z, kat)
+            lx, ly = (-h * 0.6 + i * ZAP_KOLKO_R * 2.4, -h * 0.6)
+        kx, ky = _obrot(cx, cy, lx, ly, kat)
+        msp.add_circle((kx, ky), ZAP_KOLKO_R, dxfattribs={"layer": L})
+        _tekst_z_maska(msp, _fmt_calk(z.dlugosc), (kx, ky), NUMER_WYS, L, kat=kat)
+
+    # --- ramka opisowa (obrys + tekst), po stronie ZEWNĘTRZNEJ (dalej od trasy),
+    #     czyli w lokalnym +Y (symbol jest na linii offsetu, trasa jest w -Y) ---
+    ety = []
+    if szapasy:
+        ety.append("; ".join(z.etykieta for z in szapasy))
+    if zmufy:
+        ety.append("; ".join(z.etykieta for z in zmufy))
+    wiersz1 = "; ".join(ety)                 # np. "SZ-2; ZR-2"
+    wiersz2 = f"st. nr {nr_std}"             # dowiązanie do studni
+    _rysuj_ramke_opisu(msp, cx, cy, kat, h, wiersz1, wiersz2)
 
 
-def _symbol_zapas(msp, cx, cy, z, kat) -> None:
-    """Pomarańczowy prostokąt (zapas) + długość w kółku + etykieta SZ-x z maską."""
-    h = ZAPAS_BOK / 2.0
+def _rysuj_ramke_opisu(msp, cx, cy, kat, h, wiersz1, wiersz2) -> None:
+    """
+    Ramka opisowa NAD symbolem po stronie od trasy (lokalnie +Y): prostokąt
+    (obrys, warstwa 'obramowanie ramek') + dwa wiersze tekstu, obrócone o `kat`.
+    Rozmiar dobrany do dłuższego wiersza (żeby tekst się mieścił).
+    """
+    hs = ZAP_OPIS_WYS
+    maks_znakow = max(len(wiersz1), len(wiersz2), 1)
+    szer = maks_znakow * 0.62 * hs + 2.5
+    interlinia = 1.7 * hs
+    wys = 2 * interlinia + 1.5
+    # dolna krawędź ramki tuż NAD kwadratem (lokalnie w górę o h + margines)
+    dy0 = h + 2.0           # dolna krawędź ramki (lokalnie, strona od trasy)
+    gy = dy0 + wys          # górna krawędź
+    cxl = -szer / 2.0
+    rogi = [(cxl, dy0), (cxl + szer, dy0), (cxl + szer, gy), (cxl, gy)]
     msp.add_lwpolyline(
-        [(cx - h, cy - h), (cx + h, cy - h), (cx + h, cy + h), (cx - h, cy + h)],
-        close=True,
-        dxfattribs={"layer": "kabel projektowany"},
+        [_obrot(cx, cy, dx, dy, kat) for dx, dy in rogi],
+        close=True, dxfattribs={"layer": "obramowanie ramek"},
     )
-    # kółko z długością zapasu
-    kx, ky = cx + ZAPAS_BOK, cy + ZAPAS_BOK
-    msp.add_circle((kx, ky), NUMER_PROMIEN, dxfattribs={"layer": "wymiarowanie"})
-    _tekst_z_maska(msp, _fmt(z.dlugosc), (kx, ky), NUMER_WYS, "wymiarowanie", kat=kat)
-    # etykieta SZ-x
-    _tekst_z_maska(msp, z.etykieta, (cx, cy - ZAPAS_BOK - 1.0),
-                   NUMER_WYS, "wymiarowanie", kat=kat)
-
-
-def _symbol_mufa(msp, cx, cy, z, kat) -> None:
-    """Pomarańczowy trójkąt (mufa) + etykieta ZR-x z maską."""
-    h = MUFA_BOK / 2.0
-    pkty = [(cx, cy + h), (cx - h, cy - h), (cx + h, cy - h)]
-    msp.add_solid(
-        [pkty[0], pkty[1], pkty[2], pkty[2]],
-        dxfattribs={"layer": "kabel projektowany"},
-    )
-    _tekst_z_maska(msp, z.etykieta, (cx, cy - MUFA_BOK - 1.0),
-                   NUMER_WYS, "wymiarowanie", kat=kat)
+    # dwa wiersze wyśrodkowane w pionie ramki (wiersz1 wyżej, wiersz2 niżej)
+    ys = dy0 + wys / 2.0
+    for txt, ly in ((wiersz1, ys + interlinia * 0.5),
+                    (wiersz2, ys - interlinia * 0.5)):
+        px, py = _obrot(cx, cy, 0.0, ly, kat)
+        _tekst_z_maska(msp, txt, (px, py), hs, "obramowanie ramek", kat=kat)
 
 
 # --- geometria pomocnicza ---
@@ -435,6 +525,11 @@ def _wektor_normalny(proj: Projekt, idx: int, dystans: float) -> tuple[float, fl
 def _fmt(v: float) -> str:
     """Format długości: 1 miejsce po przecinku, przecinek dziesiętny (PL)."""
     return f"{v:.1f}".replace(".", ",")
+
+
+def _fmt_calk(v: float) -> str:
+    """Długość zapasu BEZ miejsc po przecinku (np. 15,0 -> '15')."""
+    return str(int(round(v)))
 
 
 # --- API ---

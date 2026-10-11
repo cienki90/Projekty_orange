@@ -96,6 +96,11 @@ class Projekt:
     dane: DaneProjektu = field(default_factory=DaneProjektu)
     epsg_2000: Optional[int] = None   # dobrany kod strefy PL-2000 (2176..2179)
 
+    # Pozycje narysowanych symboli zapasów/muf w PL-2000 — zapamiętywane przy
+    # rysowaniu, przydatne później (Etap 5: antykolizja opisów, leadery).
+    # klucz = nazwa studni; wartość = dict: {"x","y","kat","sz":bool,"zr":bool}
+    pozycje_zapasow: dict = field(default_factory=dict)
+
     # --- obliczenia długości ---
 
     def dlugosc_trasowa(self) -> float:

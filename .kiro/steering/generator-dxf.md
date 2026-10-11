@@ -26,3 +26,16 @@
   zawsze widoczna.
 - Podkład: raster OSM w odcieniach szarości (program pobiera z internetu).
 - Kolor pomarańczowy = ACI 30 (warstwy Światłowód / kabel projektowany).
+
+## Zapasy (SZ) i mufy (ZR) — wygląd (wzorce: zapas.png / mufa.png / zapas i mufa.png)
+- Symbole rysowane NA pomarańczowej linii offsetu (15 j), BEZ kreski łączącej
+  z trasą; wszystko OBRÓCONE zgodnie z kierunkiem tej linii.
+- Zapas (SZ): pomarańczowy KWADRAT 10×10 (obrys) + kółko z długością zapasu
+  BEZ miejsc po przecinku (np. „15"). Przy SZ+ZR na jednej studni: dwa kółka.
+- Mufa (ZR): pomarańczowy TRÓJKĄT (wypełniony). SZ+ZR razem = kwadrat + trójkąt
+  w środku.
+- Ramka opisowa (obrys + czarny tekst) po stronie OD trasy, 2 wiersze:
+  „SZ-x"/„ZR-x"/„SZ-x; ZR-x" oraz „st. nr <numer porządkowy studni>" (dowiązanie).
+- Pozycje narysowanych symboli zapamiętywane w `Projekt.pozycje_zapasow`
+  (nazwa studni -> x, y, kąt, czy SZ, czy ZR) — do użycia w Etapie 5
+  (antykolizja opisów / leadery).

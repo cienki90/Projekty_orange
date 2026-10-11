@@ -174,8 +174,14 @@ danymi. Gdy go brak — program tworzy arkusze zastępcze (fallback).
   kanałów ("1").
 - Długość **trasowa** = suma odcinków z WT (Zał 3).
 - Długość **montażowa** = `trasowa × 1,03 + Σ(zapasy)`; wynik zaokrąglany do 0,1 m.
-- Zapas: `SZ-x` (pomarańczowy prostokąt + długość w kółku), tylko przy studniach.
-- Mufa: `ZR-x` (pomarańczowy trójkąt, tylko symbol).
+- Zapas: `SZ-x` — pomarańczowy **kwadrat 10×10** (obrys) + kółko z długością
+  **bez miejsc po przecinku**; na pomarańczowej linii offsetu, bez kreski łączącej.
+- Mufa: `ZR-x` — pomarańczowy **trójkąt** (wypełniony).
+- SZ+ZR przy jednej studni: kwadrat + trójkąt w środku + dwa kółka z długością.
+- Symbole są **obrócone zgodnie z kierunkiem** pomarańczowej linii; ramka opisowa
+  (obrys + czarny tekst) ma 2 wiersze: `SZ-x`/`ZR-x`/`SZ-x; ZR-x` oraz
+  `st. nr <numer studni>` (dowiązanie). Pozycje symboli są zapamiętywane
+  (`Projekt.pozycje_zapasow`) na potrzeby Etapu 5.
 - Numeracja SZ i ZR niezależna, od 1, w kolejności wzdłuż trasy.
 - Trasa = odcinki proste studnia→studnia (wg kolejności w `współrzędne.xlsx`).
 - Wszystkie teksty: czcionka **Arial**.
