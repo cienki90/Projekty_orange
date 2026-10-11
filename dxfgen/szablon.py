@@ -681,7 +681,8 @@ def _rysuj_ramke_zakonczenia(layout, proj: Projekt, ark: Arkusz, strona: str,
     if kotwica is not None:
         lx, gy = kotwica
     else:
-        lx, gy = _dobierz_pozycje_ramki(proj, ark, strona, szer_ramki, wys_ramki, cel)
+        lx, gy = _dobierz_pozycje_ramki(layout, proj, ark, strona,
+                                        szer_ramki, wys_ramki, cel)
     # prawy-dolny róg
     px = lx + szer_ramki
     dy = gy - wys_ramki
@@ -755,6 +756,47 @@ def _offset_papier(proj: Projekt, ark: Arkusz):
     return out
 
 
+def _opisy_papier(layout, ark: Arkusz):
+    """
+    Prostokąty (AABB na papierze) obejmujące OPISY model space widoczne w oknie:
+    nazwy studni, numery porządkowe, wymiary, cyfry kanałów, etykiety SZ/ZR.
+    Każdy obrócony tekst otaczamy prostokątem osiowym (konserwatywnie), aby
+    ramka zakończenia go nie zasłoniła.
+    """
+    import math
+    PX, PY = _VP_CENTER_PAPER
+    VX0, VY0, VX1, VY1 = _VP_OBSZAR
+    try:
+        msp = layout.doc.modelspace()
+    except Exception:
+        return []
+    warstwy = {"Nazwa studni", "_liczba", "_liczba kanałów", "wymiary",
+               "wymiarowanie"}
+    out = []
+    for e in msp.query("MTEXT"):
+        if e.dxf.layer not in warstwy:
+            continue
+        txt = (e.text or "").replace("\\P", " ")
+        txt = txt.split(";")[-1] if "\\" in txt else txt  # odrzuć kody formatu
+        if not txt.strip():
+            continue
+        h = e.dxf.char_height or 1.6
+        w = _szerokosc_linii(txt.strip(), h) / ZAPAS_SZER
+        # środek etykiety w papierze
+        ins = e.dxf.insert
+        cx = PX + (ins[0] - ark.center_x)
+        cy = PY + (ins[1] - ark.center_y)
+        if not (VX0 - 20 <= cx <= VX1 + 20 and VY0 - 20 <= cy <= VY1 + 20):
+            continue
+        # obrócony tekst -> AABB obejmujący prostokąt w×h obrócony o rotację
+        rot = math.radians(e.dxf.rotation or 0.0)
+        hw, hh = w / 2.0, h / 2.0
+        ex = abs(hw * math.cos(rot)) + abs(hh * math.sin(rot))
+        ey = abs(hw * math.sin(rot)) + abs(hh * math.cos(rot))
+        out.append((cx - ex, cy - ey, cx + ex, cy + ey))
+    return out
+
+
 def _koliduje_prost(box, other, margines=1.0) -> bool:
     """Kolizja dwóch prostokątów AABB (x0,y0,x1,y1) z marginesem."""
     ax0, ay0, ax1, ay1 = box
@@ -778,19 +820,20 @@ def _odcinek_prostokat(p, q, bok=2.0):
     return out
 
 
-def _dobierz_pozycje_ramki(proj: Projekt, ark: Arkusz, strona: str,
+def _dobierz_pozycje_ramki(layout, proj: Projekt, ark: Arkusz, strona: str,
                            szer: float, wys: float, cel) -> tuple[float, float]:
     """
     Dobiera lewy-górny róg ramki zakończenia tak, aby prostokąt ramki:
       - mieścił się na papierze (z marginesem),
-      - NIE nachodził na trasę, tabelki ani opis górny-prawy,
+      - NIE nachodził na ŻADEN element projektu: trasę, pomarańczową linię
+        offsetu, OPISY (nazwy studni, numery, wymiary, zapasy/mufy) ani tabelki,
       - leżał możliwie blisko skrajnej studni (ładny, krótki leader).
-    Zwraca (lx, gy). Gdy nic nie pasuje — pozycja domyślna (fallback).
+    Zwraca (lx, gy). Gdy nic nie pasuje — pozycja najmniej kolidująca.
     """
     VX0, VY0, VX1, VY1 = _VP_OBSZAR
     MARG = 6.0
 
-    # przeszkody: tabelki + odcinki trasy + pomarańczowa linia offsetu
+    # przeszkody: tabelki + odcinki trasy + pomarańczowa linia offsetu + OPISY
     # (ramka zakończenia nie może zasłaniać ŻADNEGO elementu projektowanego)
     przeszkody = list(_ZASLONIETE)
     tp = _trasa_papier(proj, ark)
@@ -801,6 +844,8 @@ def _dobierz_pozycje_ramki(proj: Projekt, ark: Arkusz, strona: str,
     op = _offset_papier(proj, ark)
     for i in range(len(op) - 1):
         przeszkody.extend(_odcinek_prostokat(op[i], op[i + 1]))
+    # opisy z model space (nazwy studni, numery, wymiary, SZ/ZR) jako przeszkody
+    przeszkody.extend(_opisy_papier(layout, ark))
 
     # punkt docelowy (skrajna studnia) — chcemy ramkę blisko niego, ale nie na trasie
     tx, ty = cel if cel else (_VP_CENTER_PAPER)
