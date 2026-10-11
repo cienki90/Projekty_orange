@@ -59,6 +59,7 @@ WARSTWY = [
     ("Otworówka", ACI_BIALY, "Continuous", LW_OPIS),
     ("obramowanie ramek", ACI_BIALY, "Continuous", LW_OPIS),
     ("Defpoints", ACI_BIALY, "Continuous", -3),
+    ("podkład OSM", ACI_BIALY, "Continuous", LW_OPIS),   # raster tła (najniżej)
 ]
 
 STYL_ARIAL = "Arial"
@@ -471,6 +472,39 @@ def rysuj_zawartosc(msp, proj: Projekt) -> None:
     _rysuj_numery(msp, proj, rejestr)
     _rysuj_nazwy(msp, proj, rejestr)
     _rysuj_zapasy_mufy(msp, proj)
+
+
+def wstaw_podklad(doc, msp, osadzenie: dict) -> None:
+    """
+    Wstawia georeferowany raster (JPG) jako encję IMAGE w model space,
+    na warstwie 'podkład OSM'. Obraz jest umieszczany najniżej (rysowany jako
+    pierwszy), tak by trasa/opisy były NAD nim.
+
+    osadzenie: słownik z podklad.generuj_podklad_jpg (insert = lewy-dolny róg
+    w PL-2000, szer_m/wys_m = rozmiar w metrach, px_w/px_h = piksele).
+    """
+    import os
+
+    sciezka = osadzenie["sciezka"]
+    insert = osadzenie["insert"]            # (x, y) lewy-dolny róg [PL-2000]
+    szer_m = osadzenie["szer_m"]
+    wys_m = osadzenie["wys_m"]
+    px_w = osadzenie["px_w"]
+    px_h = osadzenie["px_h"]
+
+    # IMAGEDEF odwołuje się do pliku WZGLĘDEM DXF (ten sam katalog), aby po
+    # przeniesieniu pary .dxf + .jpg obraz nadal się odnajdywał
+    sciezka_wzgl = os.path.basename(sciezka)
+    image_def = doc.add_image_def(filename=sciezka_wzgl, size_in_pixel=(px_w, px_h))
+
+    # insert = lewy-DOLNY róg w PL-2000; size_in_units = rozmiar w metrach.
+    # ezdxf sam policzy u/v-pixel; obraz rośnie w górę (standard georeferencji).
+    msp.add_image(
+        image_def=image_def,
+        insert=(insert[0], insert[1]),
+        size_in_units=(szer_m, wys_m),
+        dxfattribs={"layer": "podkład OSM"},
+    )
 
 
 def generuj_model_dxf(proj: Projekt, sciezka_wyjscia: str) -> str:

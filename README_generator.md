@@ -20,7 +20,8 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
       viewporty z fragmentami trasy, podział na strony z zakładem na ostatnią
       widoczną studnię (lub zadaną odległość), tabelka rysunkowa z WT
       (z kontrolą mieszczenia tekstu).
-- [ ] **Etap 3** — podkład OSM (raster, odcienie szarości).
+- [x] **Etap 3** — podkład OSM (raster w odcieniach szarości, georeferowany,
+      zapisywany jako JPG obok DXF i osadzany jako IMAGE pod trasą).
 - [ ] **Etap 4** — GUI (PySide6): wczytywanie plików, lista + wskazywanie
       zapasów/muf, podgląd, generowanie.
 - [ ] **Etap 5** — antykolizja opisów (przesuwanie + leadery).
@@ -53,6 +54,26 @@ Ramka jest dopasowywana do szerokości tekstu (bez zawijania).
 Skala (`1:1000`), opis rysunku (`PRZEBIEG PROJEKTOWANEJ TRASY`) oraz numer
 rysunku są **gwarantowane na każdym arkuszu** (rysowane od zera — klonowane
 arkusze potrafiły je gubić). Numer rysunku: **2.1, 2.2, 2.3, …** (kolejno).
+
+### Podkład OSM (Etap 3)
+
+Program pobiera kafle OpenStreetMap, skleja je, przelicza (resampling) do układu
+rysunku **PL-2000** i zapisuje jako **JPG w odcieniach szarości**:
+
+- plik podkładu powstaje OBOK DXF pod nazwą `<wynik>_podklad.jpg`
+  (**trzeba go trzymać razem z plikiem DXF** — DXF odwołuje się do niego
+  względną ścieżką przez encję `IMAGE`/`IMAGEDEF`),
+- raster jest **georeferowany** (siatka wyjściowa w PL-2000, każdy piksel
+  próbkowany z mozaiki Web Mercator), więc idealnie pokrywa się z wektorową
+  trasą; wstawiany jest NAJNIŻEJ (warstwa `podkład OSM`), pod trasą i opisami,
+- wymaga internetu przy generowaniu. Gdy brak sieci — podkład jest pomijany
+  bez błędu (DXF powstaje bez tła),
+- aby wygenerować **bez** podkładu: `generuj.bat --bez-podkladu ...`
+  (lub `python generuj.py --bez-podkladu ...`),
+- kafle są cache'owane w katalogu `.cache_osm/` (przyspiesza ponowne uruchomienia).
+
+> Dane podkładu: © OpenStreetMap contributors (ODbL). Źródło kafli łatwo
+> podmienić (stała `SZABLON_URL` w `dxfgen/podklad.py`), np. na własny WMTS.
 
 ### Kontrola zasłaniania rzutni przez tabelki
 

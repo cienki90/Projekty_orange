@@ -58,6 +58,21 @@ def main(argv: list[str]) -> int:
     for typ, n in sorted(c.items(), key=lambda x: -x[1]):
         print(f"   {typ:14s} {n}")
 
+    # podkład OSM (IMAGE) — przypomnienie o pliku JPG obok DXF
+    import os
+    obrazy = list(msp.query("IMAGE"))
+    if obrazy:
+        for im in obrazy:
+            try:
+                nazwa = im.image_def.dxf.filename
+            except Exception:
+                nazwa = "?"
+            jest = os.path.exists(os.path.join(os.path.dirname(sciezka), nazwa))
+            print(f"\nPodkład OSM (IMAGE): {nazwa}  "
+                  f"[plik {'JEST' if jest else 'BRAK — skopiuj JPG obok DXF!'}]")
+    else:
+        print("\nPodkład OSM (IMAGE): brak (wygenerowano bez tła)")
+
     # arkusze
     arkusze = [n for n in doc.layouts.names() if n != "Model"]
     print(f"\nArkusze ({len(arkusze)}):")

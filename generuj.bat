@@ -7,6 +7,10 @@ REM  Uzycie:
 REM    generuj.bat                     (OKNO WYBORU plikow)
 REM    generuj.bat --auto              (auto-wykrycie, bez okna)
 REM    generuj.bat wspol.xlsx wt.xls out.dxf
+REM
+REM  Flaga: --bez-podkladu  -> bez podkladu OSM (gdy brak internetu)
+REM  UWAGA: podklad zapisywany jest jako <out>_podklad.jpg OBOK DXF.
+REM         Przy przenoszeniu DXF zabierz tez ten plik JPG!
 REM ============================================================
 setlocal
 cd /d "%~dp0"
@@ -47,6 +51,7 @@ if errorlevel 1 (
 
 echo.
 echo === Gotowe ===
+echo Jesli powstal plik *_podklad.jpg - trzymaj go OBOK pliku DXF.
 echo Mozesz sprawdzic wynik: sprawdz.bat
 pause
 endlocal

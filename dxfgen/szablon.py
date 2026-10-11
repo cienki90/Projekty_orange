@@ -958,15 +958,42 @@ def _usun_smieci_ramek(layout) -> None:
             pass
 
 
+def _dolacz_podklad(doc, msp, proj, sciezka_wyjscia: str) -> None:
+    """
+    Generuje georeferowany podkład OSM (grayscale JPG obok DXF) i wstawia go
+    jako IMAGE pod trasą. Przy braku sieci/biblioteki — pomija bez błędu.
+    Nazwa JPG = <nazwa_dxf bez rozszerzenia>_podklad.jpg.
+    """
+    import os
+    try:
+        from . import podklad as _podklad_mod
+    except Exception:
+        return
+    baza = os.path.splitext(sciezka_wyjscia)[0]
+    sciezka_jpg = f"{baza}_podklad.jpg"
+    try:
+        osadzenie = _podklad_mod.generuj_podklad_jpg(proj, sciezka_jpg)
+    except Exception:
+        osadzenie = None
+    if osadzenie:
+        try:
+            dxf_model.wstaw_podklad(doc, msp, osadzenie)
+        except Exception:
+            pass
+
+
 def generuj_z_szablonu(
     proj: Projekt,
     sciezka_wyjscia: str,
     sciezka_wzorca: str | None = None,
     zaklad_m: float | None = None,
+    podklad: bool = True,
 ) -> tuple[str, int]:
     """
     Generuje DXF używając zab2.dxf jako szablonu arkuszy i tabelki.
     Zwraca (ścieżka, liczba_arkuszy).
+
+    podklad=True -> dołącza georeferowany raster OSM (grayscale JPG) pod trasą.
     """
     wzorzec = _znajdz_wzorzec(sciezka_wzorca)
     doc = ezdxf.readfile(wzorzec)
@@ -983,6 +1010,11 @@ def generuj_z_szablonu(
     # 3) narysuj nowe dane w model space
     proj.przelicz_numery_zapasow()
     msp = doc.modelspace()
+
+    # 3a) PODKŁAD OSM — wstawiamy NAJPIERW (najniżej), żeby trasa była nad nim
+    if podklad:
+        _dolacz_podklad(doc, msp, proj, sciezka_wyjscia)
+
     dxf_model.rysuj_zawartosc(msp, proj)
 
     # 4) arkusze: klonuj wzorcowy layout dla każdego fragmentu trasy

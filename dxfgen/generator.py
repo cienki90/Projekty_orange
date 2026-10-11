@@ -22,11 +22,13 @@ def generuj_pelny_dxf(
     zaklad_m: float | None = None,
     sciezka_wzorca: str | None = None,
     uzyj_szablonu: bool = True,
+    podklad: bool = True,
 ) -> tuple[str, int]:
     """
     Generuje kompletny DXF: model space + arkusze A3 (1:1000, DWG To PDF).
 
     uzyj_szablonu=True -> arkusze i tabelka kopiowane z zab2.dxf (zalecane).
+    podklad=True       -> dołącza georeferowany raster OSM (grayscale JPG) pod trasą.
     Zwraca (ścieżka_pliku, liczba_arkuszy).
     """
     if uzyj_szablonu:
@@ -34,6 +36,7 @@ def generuj_pelny_dxf(
             return generuj_z_szablonu(
                 proj, sciezka_wyjscia,
                 sciezka_wzorca=sciezka_wzorca, zaklad_m=zaklad_m,
+                podklad=podklad,
             )
         except FileNotFoundError:
             # brak wzorca — fallback do generowania od zera

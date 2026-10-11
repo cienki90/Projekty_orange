@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
 wynik*.dxf
+wynik*_podklad.jpg
+*_podklad.jpg
+.cache_osm/
 *.egg-info/
 .venv/
 _tmp*
+osm_sheet*.png

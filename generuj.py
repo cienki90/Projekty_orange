@@ -38,7 +38,7 @@ def _znajdz_pliki() -> tuple[str | None, str | None]:
     return wspol, wt
 
 
-def _generuj(wspol: str, wt: str, wyjscie: str) -> int:
+def _generuj(wspol: str, wt: str, wyjscie: str, podklad: bool = True) -> int:
     if not os.path.exists(wspol):
         print(f"[BŁĄD] Brak pliku współrzędnych: {wspol}")
         return 2
@@ -58,8 +58,15 @@ def _generuj(wspol: str, wt: str, wyjscie: str) -> int:
         s0 = proj.studnie[0]
         print(f"  1. studnia:        {s0.nazwa}  -> X={s0.x:.3f}  Y={s0.y:.3f}")
 
-    sciezka, n_ark = generuj_pelny_dxf(proj, wyjscie)
+    if podklad:
+        print("  Podkład OSM:       pobieram kafle i buduję JPG...")
+    sciezka, n_ark = generuj_pelny_dxf(proj, wyjscie, podklad=podklad)
     print(f"  Arkusze A3 1:1000: {n_ark}")
+    jpg = os.path.splitext(wyjscie)[0] + "_podklad.jpg"
+    if podklad and os.path.exists(jpg):
+        print(f"  Podkład (JPG):     {jpg}  (trzymaj obok DXF!)")
+    elif podklad:
+        print("  Podkład OSM:       pominięto (brak sieci lub błąd pobierania)")
     print(f"Zapisano DXF: {sciezka}")
     return 0
 
@@ -68,11 +75,14 @@ def main(argv: list[str]) -> int:
     args = [a for a in argv[1:] if not a.startswith("--")]
     flagi = {a for a in argv[1:] if a.startswith("--")}
 
+    # --bez-podkladu / --no-osm : wyłącza pobieranie podkładu OSM
+    podklad = not ({"--bez-podkladu", "--no-osm"} & flagi)
+
     # tryb jawny: podano oba pliki w argumentach
     if len(args) >= 2:
         wspol, wt = args[0], args[1]
         wyjscie = args[2] if len(args) > 2 else "wynik.dxf"
-        return _generuj(wspol, wt, wyjscie)
+        return _generuj(wspol, wt, wyjscie, podklad)
 
     # podpowiedzi z auto-wykrycia
     auto_wspol, auto_wt = _znajdz_pliki()
@@ -85,7 +95,7 @@ def main(argv: list[str]) -> int:
             return 2
         wyjscie = args[0] if len(args) == 1 else "wynik.dxf"
         print("Auto-wykryto pliki wejściowe.")
-        return _generuj(auto_wspol, auto_wt, wyjscie)
+        return _generuj(auto_wspol, auto_wt, wyjscie, podklad)
 
     # tryb domyślny: okno wyboru plików
     try:
@@ -100,7 +110,7 @@ def main(argv: list[str]) -> int:
     if wybor is None:
         print("Anulowano.")
         return 1
-    return _generuj(*wybor)
+    return _generuj(*wybor, podklad=podklad)
 
 
 if __name__ == "__main__":
