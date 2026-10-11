@@ -66,6 +66,12 @@ rysunku **PL-2000** i zapisuje jako **JPG w odcieniach szarości**:
 - raster jest **georeferowany** (siatka wyjściowa w PL-2000, każdy piksel
   próbkowany z mozaiki Web Mercator), więc idealnie pokrywa się z wektorową
   trasą; wstawiany jest NAJNIŻEJ (warstwa `podkład OSM`), pod trasą i opisami,
+- podkład jest **wysokiej rozdzielczości** (zoom auto-dobierany, do ~z19) i tylko
+  **lekko rozjaśniony** (jasna szarość jak w `zab3.pdf`), tak aby **nazwy ulic i
+  numery domów pozostały czytelne**,
+- bufor zasięgu wokół trasy: ok. **120 m** z każdej strony (więcej kontekstu);
+  liczba kafli jest ograniczana budżetem (auto-zejście o poziom zoom przy dużym
+  obszarze), by nie przeciążać serwera kafli,
 - wymaga internetu przy generowaniu. Gdy brak sieci — podkład jest pomijany
   bez błędu (DXF powstaje bez tła),
 - aby wygenerować **bez** podkładu: `generuj.bat --bez-podkladu ...`

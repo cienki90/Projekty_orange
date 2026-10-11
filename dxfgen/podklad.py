@@ -34,11 +34,15 @@ USER_AGENT = "generator-dxf-orange/1.0 (projekt techniczny; kontakt: lokalny)"
 ROZMIAR_KAFLA = 256  # px
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", ".cache_osm")
 
-# dobór poziomu zoom tak, aby 1 m terenu ~ odpowiadał rozsądnej rozdzielczości
-# (na 1:1000 wystarcza z=18..19; wyżej = ostrzej, ale więcej kafli)
-ZOOM_DOMYSLNY = 18
-MARGINES_M = 40.0           # zapas terenu wokół trasy [m]
-JASNOSC = 1.35              # rozjaśnienie szarości (1.0 = bez zmian)
+# dobór poziomu zoom — wyższy = ostrzej (więcej szczegółów: nazwy ulic, numery).
+# z=19 daje bardzo czytelne etykiety na skali 1:1000.
+ZOOM_DOMYSLNY = 19
+MARGINES_M = 120.0          # ZAPAS terenu wokół trasy [m] (zwiększony bufor)
+# Delikatne rozjaśnienie szarości — tak, by podkład był jasny jak w zab3.pdf,
+# ale NAZWY ULIC i NUMERY pozostały czytelne (bez „prania" obrazu).
+JASNOSC = 1.06
+KONTRAST = 1.08             # lekki kontrast, by etykiety były wyraźne
+MAKS_PX = 8000             # wyższy limit rozdzielczości wyjścia (ostrość)
 
 
 # --------------------------------------------------------------------------- #
@@ -120,6 +124,22 @@ def generuj_podklad_jpg(
     from pyproj import Transformer
     do_wgs = Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
 
+    # --- auto-dobór zoomu: najwyższy (najostrzejszy), który mieści się w
+    #     budżecie kafli; przy dużym buforze schodzimy o poziom niżej, żeby nie
+    #     ściągać setek kafli (polityka OSM) i nie przeciążać pamięci ---
+    def _liczba_kafli(z):
+        rogi = [(minx, miny), (minx, maxy), (maxx, miny), (maxx, maxy)]
+        ll = [do_wgs.transform(x, y) for x, y in rogi]
+        xs_t = [_lonlat_do_kafla(lo, la, z)[0] for lo, la in ll]
+        ys_t = [_lonlat_do_kafla(lo, la, z)[1] for lo, la in ll]
+        nx = int(math.ceil(max(xs_t))) - int(math.floor(min(xs_t)))
+        ny = int(math.ceil(max(ys_t))) - int(math.floor(min(ys_t)))
+        return nx * ny
+
+    BUDZET_KAFLI = 240
+    while zoom > 14 and _liczba_kafli(zoom) > BUDZET_KAFLI:
+        zoom -= 1
+
     # rozdzielczość wyjściowa: ~ dopasowana do zoomu w centrum obszaru
     cx, cy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
     clon, clat = do_wgs.transform(cx, cy)
@@ -127,10 +147,9 @@ def generuj_podklad_jpg(
     m_na_px = 156543.03392 * math.cos(math.radians(clat)) / (2 ** zoom)
     px_w = max(256, int(szer_m / m_na_px))
     px_h = max(256, int(wys_m / m_na_px))
-    # ogranicz rozmiar wyjścia (bezpieczeństwo)
-    MAKS = 4000
-    if px_w > MAKS or px_h > MAKS:
-        skala = MAKS / max(px_w, px_h)
+    # ogranicz rozmiar wyjścia (bezpieczeństwo), ale pozwól na większą ostrość
+    if px_w > MAKS_PX or px_h > MAKS_PX:
+        skala = MAKS_PX / max(px_w, px_h)
         px_w = int(px_w * skala)
         px_h = int(px_h * skala)
 
@@ -144,8 +163,8 @@ def generuj_podklad_jpg(
     y0t, y1t = int(math.floor(min(yts))), int(math.ceil(max(yts)))
 
     kafli = (x1t - x0t) * (y1t - y0t)
-    if kafli <= 0 or kafli > 400:
-        # zbyt duży obszar na ten zoom — odpuść (albo zmień zoom)
+    if kafli <= 0 or kafli > BUDZET_KAFLI + 40:
+        # zbyt duży obszar na ten zoom — odpuść (zabezpieczenie)
         return None
 
     mozaika = Image.new("RGB", ((x1t - x0t) * ROZMIAR_KAFLA,
@@ -187,13 +206,16 @@ def generuj_podklad_jpg(
     out = moz[py, px].reshape(px_h, px_w, 3)
     obraz = Image.fromarray(out, "RGB")
 
-    # --- odcienie szarości + rozjaśnienie ---
+    # --- odcienie szarości: lekko rozjaśnione + lekki kontrast, żeby NAZWY
+    #     ULIC i NUMERY pozostały czytelne (jak w zab3.pdf), bez „prania" ---
     szary = ImageOps.grayscale(obraz)
+    szary = ImageEnhance.Contrast(szary).enhance(KONTRAST)
     szary = ImageEnhance.Brightness(szary).enhance(JASNOSC)
     szary = szary.convert("RGB")  # JPG lubi RGB
 
     os.makedirs(os.path.dirname(os.path.abspath(sciezka_jpg)) or ".", exist_ok=True)
-    szary.save(sciezka_jpg, "JPEG", quality=85)
+    # wyższa jakość JPG -> ostrzejsze etykiety
+    szary.save(sciezka_jpg, "JPEG", quality=92)
 
     return {
         "sciezka": sciezka_jpg,
