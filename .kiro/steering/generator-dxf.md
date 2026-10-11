@@ -32,8 +32,11 @@
   z trasą; wszystko OBRÓCONE zgodnie z kierunkiem tej linii.
 - Zapas (SZ): pomarańczowy KWADRAT 10×10 (obrys) + kółko z długością zapasu
   BEZ miejsc po przecinku (np. „15"). Przy SZ+ZR na jednej studni: dwa kółka.
-- Mufa (ZR): pomarańczowy TRÓJKĄT (wypełniony). SZ+ZR razem = kwadrat + trójkąt
-  w środku.
+- Mufa (ZR): pomarańczowy TRÓJKĄT (wypełniony), WIERZCHOŁEK skierowany wzdłuż
+  trasy (lokalny +X). SZ+ZR razem = kwadrat + trójkąt w środku.
+- Oznaczenia (kwadrat, kółko, ramka opisowa) rysujemy LINIĄ CIĄGŁĄ
+  (`linetype="Continuous"`), bo warstwa 'kabel projektowany' jest przerywana
+  tylko dla linii offsetu.
 - Ramka opisowa (obrys + czarny tekst) po stronie OD trasy, 2 wiersze:
   „SZ-x"/„ZR-x"/„SZ-x; ZR-x" oraz „st. nr <numer porządkowy studni>" (dowiązanie).
 - Pozycje narysowanych symboli zapamiętywane w `Projekt.pozycje_zapasow`

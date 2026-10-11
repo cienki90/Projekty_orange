@@ -428,19 +428,23 @@ def _rysuj_symbol_grupy(msp, cx, cy, kat, szapasy, zmufy, nr_std) -> None:
     ma_zr = bool(zmufy)
     h = ZAPAS_BOK / 2.0
 
-    # --- KWADRAT zapasu 10×10 (obrys) ---
+    # oznaczenia zapasów/muf rysujemy LINIĄ CIĄGŁĄ (warstwa 'kabel projektowany'
+    # ma typ DASHED dla linii offsetu, więc tu wymuszamy 'Continuous')
+    ATTR = {"layer": L, "linetype": "Continuous"}
+
+    # --- KWADRAT zapasu 10×10 (obrys, ciągły) ---
     if ma_sz:
         rogi = [(-h, -h), (h, -h), (h, h), (-h, h)]
         msp.add_lwpolyline(
             [_obrot(cx, cy, dx, dy, kat) for dx, dy in rogi],
-            close=True, dxfattribs={"layer": L},
+            close=True, dxfattribs=dict(ATTR),
         )
 
-    # --- TRÓJKĄT mufy (wypełniony) ---
+    # --- TRÓJKĄT mufy (wypełniony) — WIERZCHOŁEK wzdłuż trasy (lokalne +X) ---
     if ma_zr:
         mh = MUFA_BOK / 2.0
-        # trójkąt skierowany „do góry" w lokalnym układzie
-        tp = [(0.0, mh), (-mh, -mh), (mh, -mh)]
+        # apex w kierunku linii (lokalny +X), podstawa z tyłu
+        tp = [(mh, 0.0), (-mh, mh), (-mh, -mh)]
         p = [_obrot(cx, cy, dx, dy, kat) for dx, dy in tp]
         msp.add_solid([p[0], p[1], p[2], p[2]], dxfattribs={"layer": L})
 
@@ -457,7 +461,7 @@ def _rysuj_symbol_grupy(msp, cx, cy, kat, szapasy, zmufy, nr_std) -> None:
         else:
             lx, ly = (-h * 0.6 + i * ZAP_KOLKO_R * 2.4, -h * 0.6)
         kx, ky = _obrot(cx, cy, lx, ly, kat)
-        msp.add_circle((kx, ky), ZAP_KOLKO_R, dxfattribs={"layer": L})
+        msp.add_circle((kx, ky), ZAP_KOLKO_R, dxfattribs=dict(ATTR))
         _tekst_z_maska(msp, _fmt_calk(z.dlugosc), (kx, ky), NUMER_WYS, L, kat=kat)
 
     # --- ramka opisowa (obrys + tekst), po stronie ZEWNĘTRZNEJ (dalej od trasy),
@@ -490,7 +494,8 @@ def _rysuj_ramke_opisu(msp, cx, cy, kat, h, wiersz1, wiersz2) -> None:
     rogi = [(cxl, dy0), (cxl + szer, dy0), (cxl + szer, gy), (cxl, gy)]
     msp.add_lwpolyline(
         [_obrot(cx, cy, dx, dy, kat) for dx, dy in rogi],
-        close=True, dxfattribs={"layer": "obramowanie ramek"},
+        close=True,
+        dxfattribs={"layer": "obramowanie ramek", "linetype": "Continuous"},
     )
     # dwa wiersze wyśrodkowane w pionie ramki (wiersz1 wyżej, wiersz2 niżej)
     ys = dy0 + wys / 2.0
