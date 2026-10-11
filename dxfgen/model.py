@@ -85,6 +85,10 @@ class DaneProjektu:
     rys_nr: str = ""              # 2.1
     skala: str = "1:1000"
     data_rys: str = ""            # VII-2022
+    # --- dodatkowe metadane do opisu technicznego (OT .docx) ---
+    nr_archiwalny: str = ""       # np. MM/PW/04/2022 (nr archiwalny projektu)
+    data_opisu: str = ""          # np. "lipiec 2022" (miejsce+data na stronie tyt.)
+    miesiac_rozpoczecia: str = ""  # np. "wrzesień 2022" (harmonogram)
 
 
 @dataclass

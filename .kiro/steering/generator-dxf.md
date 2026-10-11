@@ -27,6 +27,15 @@
 - Podkład: raster OSM w odcieniach szarości (program pobiera z internetu).
 - Kolor pomarańczowy = ACI 30 (warstwy Światłowód / kabel projektowany).
 
+## Opis techniczny .docx (Etap 6)
+- Generowany przez `dxfgen/opis.py` (`generuj_opis_docx`) na wzór `OT 339.docx`;
+  dane łączone w `zbierz_dane_opisu` z WT (DaneProjektu) + rysunku (proj.zapasy,
+  zakończenia). Numery studni z mufą/zapasem i „wyjście HDPE" pochodzą z RYSUNKU.
+- Projektant (stały): **inż. Tomasz Waśko**, nr uprawnień **PDL/0137/PWOT/16**
+  (nr członkowski POIIB: PDL/BT/0034/17). Ustawiany w `budowa.py`, wspólny dla
+  tabelki DXF i opisu. Zastąpił Wiktora Ostasiewicza (1246/98/U).
+- Uruchomienie: `opis.bat`, `generuj.py --opis`, lub checkbox w GUI.
+
 ## Antykolizja opisów (Etap 5)
 - Jeden WSPÓLNY rejestr OBB (etykiety.Prostokat + SAT) w `rysuj_zawartosc`
   (dxf_model.py). Kolejność: zapasy/mufy (przypięte do offsetu — rejestrują się

@@ -24,6 +24,8 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
       zapisywany jako JPG obok DXF i osadzany jako IMAGE pod trasą).
 - [x] **Etap 4** — GUI (PySide6): wczytywanie plików, lista studni +
       wskazywanie zapasów (SZ) / muf (ZR), metryka na żywo, generowanie w tle.
+- [x] **Etap 6** — opis techniczny (`.docx`) generowany z WT + rysunku
+      (wzorzec `OT 339.docx`); projektant: inż. Tomasz Waśko (PDL/0137/PWOT/16).
 - [x] **Etap 5** — antykolizja opisów: WSZYSTKIE opisy model space (nazwy
       studni, numery, wymiary, cyfry kanałów oraz symbole i ramki opisowe
       zapasów/muf) współdzielą jeden rejestr OBB; kolidujące opisy są
@@ -116,6 +118,30 @@ bez argumentów, albo `python generuj.py`). Okno pozwala:
 > Gdy PySide6 nie jest zainstalowane, `generuj.py` bez argumentów użyje
 > uproszczonego okna wyboru plików (Tkinter). Flaga `--okno` wymusza to proste
 > okno nawet przy dostępnym PySide6.
+
+### Opis techniczny — .docx (Etap 6)
+
+Program generuje **opis techniczny** (Projekt Wykonawczy) w formacie `.docx`
+na wzór `OT 339.docx`. Uruchom: `opis.bat` (lub `generuj.bat --opis ...`, albo
+w GUI zaznacz „Generuj opis techniczny"). Plik powstaje obok DXF jako
+`<wynik>_opis.docx`.
+
+**Powiązania opis ↔ WT ↔ rysunek** (skąd biorą się dane):
+
+| Fragment opisu | Źródło |
+|---|---|
+| „Nr warunków: WTROI/…" | WT (Formularz 1K) → `nr_kabla` |
+| „Temat … w miejscowości X" | WT → `miasto` |
+| „Lokalizacja: adres A – adres B" | WT (1.1/1.2) → `zakonczenie_a/b_adres` |
+| „INWESTOR: … / adres" | WT → `operator`, `adres_operatora` |
+| „Kabel <typ> – <nr>, dł. trasowa X m" | WT → `typ_kabla`, `nr_kabla`; `dlugosc_trasowa()` |
+| „(długość montażowa Y m)" | `dlugosc_montazowa()` (trasowa×1,03 + Σ zapasów) |
+| „W studniach nr A, B, C … mufę i zapas" | **RYSUNEK**: numery studni z `proj.zapasy` |
+| „W studniach nr N wyjście rurą HDPE" | **RYSUNEK**: zakończenie „Wyjście rurą HDPE" |
+| „Mufa – K szt / Stelaż zapasu – M szt" | **RYSUNEK**: liczność `proj.zapasy` |
+| „Projektant / Nr uprawnień" | `projektant` = inż. Tomasz Waśko, `nr_uprawnien` = PDL/0137/PWOT/16 |
+
+> Projektant i nr uprawnień są spójne na rysunku (tabelka) i w opisie.
 
 ## Uruchamianie w Windows (pliki .bat)
 

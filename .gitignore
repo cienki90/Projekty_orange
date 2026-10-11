@@ -3,6 +3,8 @@ __pycache__/
 wynik*.dxf
 wynik*_podklad.jpg
 *_podklad.jpg
+*_opis.docx
+OT_wynik.docx
 .cache_osm/
 *.egg-info/
 .venv/

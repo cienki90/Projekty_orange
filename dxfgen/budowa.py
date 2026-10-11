@@ -33,6 +33,13 @@ def zbuduj_projekt(sciezka_wspolrzedne: str, sciezka_wt: str) -> Projekt:
         dane.zakonczenie_a_studnia = studnie[0].nazwa
         dane.zakonczenie_b_studnia = studnie[-1].nazwa
 
+    # projektant (dane stałe wg uprawnień/zaświadczenia Izby) — jeśli WT nie
+    # dostarcza projektanta, przyjmujemy obecnego: inż. Tomasz Waśko
+    if not dane.projektant:
+        dane.projektant = "inż. Tomasz Waśko"
+    if not dane.nr_uprawnien:
+        dane.nr_uprawnien = "PDL/0137/PWOT/16"
+
     proj = Projekt(
         studnie=studnie,
         odcinki=odcinki,
