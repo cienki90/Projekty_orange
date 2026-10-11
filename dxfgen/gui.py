@@ -106,6 +106,31 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             except Exception as e:  # noqa: BLE001
                 self.skonczone.emit(False, f"Błąd: {e}")
 
+    class WatekOSM(QtCore.QThread):
+        """Pobiera podkład OSM do podglądu (w tle, by GUI nie zamarzło)."""
+        gotowe = QtCore.Signal(object, object)   # (sciezka_jpg | None, geo | None)
+        info = QtCore.Signal(str)
+
+        def __init__(self, proj):
+            super().__init__()
+            self.proj = proj
+
+        def run(self):
+            try:
+                from . import podklad
+                import tempfile
+                import os
+                sj = os.path.join(tempfile.gettempdir(), "podglad_osm.jpg")
+                self.info.emit("Pobieram podkład OSM do podglądu…")
+                geo = podklad.generuj_podklad_jpg(self.proj, sj)
+                if geo:
+                    self.gotowe.emit(geo["sciezka"], geo)
+                else:
+                    self.gotowe.emit(None, None)
+            except Exception as e:  # noqa: BLE001
+                self.info.emit(f"Podkład OSM: błąd ({e})")
+                self.gotowe.emit(None, None)
+
     class PodgladTrasy(QtWidgets.QWidget):
         """
         Interaktywny podgląd trasy: rysuje studnie i odcinki dopasowane do
@@ -119,15 +144,32 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             self.proj = None
             self.wybrany = -1
             self._pkty = []     # [(sx, sy, idx)] ekranowe pozycje studni
-            self.setMinimumHeight(260)
-            self.setToolTip("Kliknij studnię, aby ją zaznaczyć; potem dodaj SZ/ZR.")
+            self._zoom = 1.0    # mnożnik powiększenia (kółko myszy)
+            self._pan = [0.0, 0.0]   # przesunięcie [px] (przeciąganie)
+            self._ostatni_mysz = None
+            self._tlo_img = None     # QImage podkładu OSM
+            self._tlo_geo = None     # {"insert","szer_m","wys_m"} georeferencja
+            self.setMinimumHeight(300)
+            self.setMouseTracking(True)
+            self.setToolTip(
+                "Kółko myszy = przybliżanie, przeciąganie = przesuwanie, "
+                "klik w studnię = zaznaczenie (potem dodaj SZ/ZR)."
+            )
 
         def ustaw_projekt(self, proj):
             self.proj = proj
+            self._zoom = 1.0
+            self._pan = [0.0, 0.0]
             self.update()
 
         def ustaw_wybrany(self, idx):
             self.wybrany = idx
+            self.update()
+
+        def ustaw_tlo(self, qimage, geo):
+            """Ustawia podkład OSM (QImage + georeferencja PL-2000)."""
+            self._tlo_img = qimage
+            self._tlo_geo = geo
             self.update()
 
         def _przelicz(self):
@@ -143,21 +185,25 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             m = 30  # margines px
             W = max(self.width() - 2 * m, 10)
             H = max(self.height() - 2 * m, 10)
-            skala = min(W / szer, H / wys)
-            # wyśrodkowanie
-            ox = m + (W - szer * skala) / 2.0
-            oy = m + (H - wys * skala) / 2.0
+            skala = min(W / szer, H / wys) * self._zoom
+            # wyśrodkowanie + pan
+            ox = m + (W - szer * skala) / 2.0 + self._pan[0]
+            oy = m + (H - wys * skala) / 2.0 + self._pan[1]
 
             def na_ekran(x, y):
                 sx = ox + (x - minx) * skala
                 sy = self.height() - (oy + (y - miny) * skala)  # odwróć Y
                 return sx, sy
+            na_ekran._minx = minx
+            na_ekran._miny = miny
+            na_ekran._skala = skala
             return na_ekran
 
         def paintEvent(self, event):  # noqa: N802
             from PySide6 import QtGui, QtCore as _C
             p = QtGui.QPainter(self)
             p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
             p.fillRect(self.rect(), QtGui.QColor("#ffffff"))
             na_ekran = self._przelicz()
             if na_ekran is None:
@@ -166,6 +212,14 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
                            "Wczytaj projekt, aby zobaczyć podgląd trasy")
                 p.end()
                 return
+            # --- PODKŁAD OSM (jeśli pobrany) — rysowany pod trasą ---
+            if self._tlo_img is not None and self._tlo_geo is not None:
+                g = self._tlo_geo
+                ix, iy = g["insert"]           # lewy-dolny róg [PL-2000]
+                tlx, tly = na_ekran(ix, iy + g["wys_m"])        # lewy-GÓRNY na ekranie
+                brx, bry = na_ekran(ix + g["szer_m"], iy)       # prawy-DOLNY na ekranie
+                cel = _C.QRectF(tlx, tly, brx - tlx, bry - tly)
+                p.drawImage(cel, self._tlo_img)
             s = self.proj.studnie
             # odcinki trasy (czarne)
             p.setPen(QtGui.QPen(QtGui.QColor("#111111"), 2))
@@ -209,6 +263,7 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             p.end()
 
         def mousePressEvent(self, event):  # noqa: N802
+            self._ostatni_mysz = (event.position().x(), event.position().y())
             if not self._pkty:
                 return
             mx, my = event.position().x(), event.position().y()
@@ -217,10 +272,37 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
                 d = (sx - mx) ** 2 + (sy - my) ** 2
                 if d < dmin:
                     dmin, najbl = d, idx
-            if najbl >= 0 and dmin <= 20 ** 2:  # tolerancja kliknięcia
+            if najbl >= 0 and dmin <= 14 ** 2:  # tolerancja kliknięcia w studnię
                 self.wybrany = najbl
                 self.update()
                 self.wybrano.emit(najbl)
+
+        def mouseMoveEvent(self, event):  # noqa: N802
+            # przeciąganie = przesuwanie widoku (pan)
+            if event.buttons() and self._ostatni_mysz is not None:
+                mx, my = event.position().x(), event.position().y()
+                self._pan[0] += mx - self._ostatni_mysz[0]
+                self._pan[1] -= my - self._ostatni_mysz[1]  # Y odwrócone
+                self._ostatni_mysz = (mx, my)
+                self.update()
+
+        def mouseReleaseEvent(self, event):  # noqa: N802
+            self._ostatni_mysz = None
+
+        def wheelEvent(self, event):  # noqa: N802
+            # kółko myszy = przybliżanie/oddalanie (zoom do kursora)
+            delta = event.angleDelta().y()
+            if delta == 0:
+                return
+            krok = 1.15 if delta > 0 else 1 / 1.15
+            nowy = max(0.3, min(self._zoom * krok, 40.0))
+            self._zoom = nowy
+            self.update()
+
+        def resetuj_widok(self):
+            self._zoom = 1.0
+            self._pan = [0.0, 0.0]
+            self.update()
 
     class Okno(QtWidgets.QMainWindow):
         def __init__(self):
@@ -299,9 +381,20 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
 
             # --- PODGLĄD TRASY (klikalny: wskazywanie studni do SZ/ZR) ---
             gb_pod = QtWidgets.QGroupBox(
-                "Podgląd trasy — kliknij studnię, potem dodaj SZ/ZR powyżej"
+                "Podgląd trasy — klik studni = zaznaczenie, kółko = zoom, "
+                "przeciąganie = przesuwanie"
             )
             vp = QtWidgets.QVBoxLayout(gb_pod)
+            pasek = QtWidgets.QHBoxLayout()
+            self.btn_osm = QtWidgets.QPushButton("Pokaż podkład OSM")
+            self.btn_osm.clicked.connect(self._pokaz_osm)
+            self.btn_osm.setEnabled(False)
+            b_reset = QtWidgets.QPushButton("Reset widoku")
+            b_reset.clicked.connect(lambda: self.podglad.resetuj_widok())
+            pasek.addWidget(self.btn_osm)
+            pasek.addWidget(b_reset)
+            pasek.addStretch(1)
+            vp.addLayout(pasek)
             self.podglad = PodgladTrasy()
             self.podglad.wybrano.connect(self._podglad_klik)
             vp.addWidget(self.podglad)
@@ -383,6 +476,7 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             self._odswiez_elementy()
             self._odswiez_metryke()
             self.btn_generuj.setEnabled(True)
+            self.btn_osm.setEnabled(True)
             self._wpis(
                 f"Wczytano: {len(self.proj.studnie)} studni, "
                 f"{len(self.proj.odcinki)} odcinków (WT), "
@@ -427,6 +521,28 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             # klik na podglądzie -> ustaw wiersz na liście (bez pętli sygnałów)
             if 0 <= idx < self.lista_studni.count():
                 self.lista_studni.setCurrentRow(idx)
+
+        def _pokaz_osm(self):
+            if not self.proj:
+                return
+            self.btn_osm.setEnabled(False)
+            self.btn_osm.setText("Pobieram podkład…")
+            self.watek_osm = WatekOSM(self.proj)
+            self.watek_osm.info.connect(self._wpis)
+            self.watek_osm.gotowe.connect(self._osm_gotowe)
+            self.watek_osm.start()
+
+        def _osm_gotowe(self, sciezka, geo):
+            from PySide6 import QtGui
+            self.btn_osm.setEnabled(True)
+            self.btn_osm.setText("Pokaż podkład OSM")
+            if sciezka and geo:
+                img = QtGui.QImage(sciezka)
+                if not img.isNull():
+                    self.podglad.ustaw_tlo(img, geo)
+                    self._wpis("Podkład OSM dodany do podglądu.")
+                    return
+            self._wpis("Podkład OSM: brak (sieć?) — podgląd bez tła.")
 
         def _odswiez_elementy(self):
             self.lista_elem.clear()

@@ -713,6 +713,13 @@ def _rysuj_ramke_zakonczenia(layout, proj: Projekt, ark: Arkusz, strona: str,
     mt.dxf.width = szer_tekstu + 0.5
     # punkt wstawienia = lewy-górny róg obszaru tekstu (po paddingu)
     mt.set_location((lx + PAD_RAMKI, gy - PAD_RAMKI), attachment_point=1)  # TOP_LEFT
+    # MASKA TŁA — przesłania podkład/obiekty pod ramką (czytelność opisu)
+    try:
+        mt.set_bg_color("canvas", scale=1.0)
+    except Exception:
+        mt.dxf.bg_fill = 1
+        mt.dxf.box_fill_scale = 1.0
+        mt.dxf.bg_fill_color = 0
 
     # --- strzałka do skrajnej studni ---
     if cel is not None:

@@ -106,6 +106,9 @@ bez argumentów, albo `python generuj.py`). Okno pozwala:
 - korzystać z **interaktywnego podglądu trasy** — rysunek całej trasy ze
   studniami; **kliknięcie studni** zaznacza ją (synchronicznie z listą), a
   markery pokazują, gdzie są już zapasy (kwadrat) i mufy (trójkąt).
+  Podgląd obsługuje **przybliżanie** (kółko myszy), **przesuwanie**
+  (przeciąganie) i opcjonalny **podkład OSM** (przycisk „Pokaż podkład OSM",
+  pobierany w tle i georeferowany pod trasą).
 
 > Gdy PySide6 nie jest zainstalowane, `generuj.py` bez argumentów użyje
 > uproszczonego okna wyboru plików (Tkinter). Flaga `--okno` wymusza to proste
