@@ -27,6 +27,16 @@
 - Podkład: raster OSM w odcieniach szarości (program pobiera z internetu).
 - Kolor pomarańczowy = ACI 30 (warstwy Światłowód / kabel projektowany).
 
+## Plan orientacyjny (Etap 7)
+- `dxfgen/orientacja.py` (`generuj_plan_orientacyjny`) — arkusz A3 jak przebieg
+  trasy, ale skala 1:10 000 lub 1:25 000 (auto-dobór by cała trasa zmieściła się
+  w rzutni), KOLOROWY podkład OSM (`podklad.generuj_podklad_jpg(grayscale=False,
+  okno_m=..., srodek=...)`), trasa jako gruba czerwona polilinia (warstwa
+  'trasa orientacyjna', ACI 1). Tabelka: Skala, opis 'MAPA POGLĄDOWA', RYS. NR 1.
+- Uruchomienie: `plan.bat`, `generuj.py --orientacja`, lub checkbox w GUI.
+- `podklad.generuj_podklad_jpg` ma parametry `grayscale` (szary vs kolor) oraz
+  `okno_m`/`srodek` (stały rozmiar okna dla zadanej skali).
+
 ## Opis techniczny .docx (Etap 6)
 - Generowany przez `dxfgen/opis.py` (`generuj_opis_docx`) — styl 1:1 jak wzorzec:
   otwiera `OT 339.docx` i podmienia TYLKO dane (podmiana na poziomie akapitu:

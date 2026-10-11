@@ -91,16 +91,23 @@ def generuj_podklad_jpg(
     sciezka_jpg: str,
     zoom: int = ZOOM_DOMYSLNY,
     margines_m: float = MARGINES_M,
+    grayscale: bool = True,
+    okno_m: tuple[float, float] | None = None,
+    srodek: tuple[float, float] | None = None,
 ) -> dict | None:
     """
-    Tworzy georeferowany podkład JPG (grayscale) pokrywający trasę + margines.
+    Tworzy georeferowany podkład JPG pokrywający trasę.
+
+    grayscale : True = odcienie szarości (podkład przebiegu trasy, jak zab3.pdf);
+                False = kolorowy OSM (plan orientacyjny).
+    okno_m    : (szer_m, wys_m) — jeśli podane, obszar ma DOKŁADNIE taki rozmiar
+                terenu (np. dla stałej skali 1:10000/1:25000); gdy None — obszar
+                dobierany ciasno do trasy + margines_m.
+    srodek    : (cx, cy) środek obszaru w PL-2000 (domyślnie środek bbox trasy).
 
     Zwraca słownik osadzenia:
-        {"sciezka": <jpg>, "insert": (x_pl2000, y_pl2000_dolny_lewy),
-         "szer_m": <szerokość w metrach>, "wys_m": <wysokość w metrach>,
-         "px_w": <piksele>, "px_h": <piksele>}
-    lub None, gdy nie udało się pobrać podkładu (brak sieci) — generator
-    kontynuuje wtedy bez tła.
+        {"sciezka", "insert"(lewy-dolny), "szer_m", "wys_m", "px_w", "px_h"}
+    lub None przy braku sieci/biblioteki.
     """
     try:
         from PIL import Image, ImageEnhance, ImageOps
@@ -112,13 +119,20 @@ def generuj_podklad_jpg(
         return None
     epsg = proj.epsg_2000
 
-    # zasięg trasy w PL-2000 + margines
     xs = [p.x for p in s]
     ys = [p.y for p in s]
-    minx, maxx = min(xs) - margines_m, max(xs) + margines_m
-    miny, maxy = min(ys) - margines_m, max(ys) + margines_m
-    szer_m = maxx - minx
-    wys_m = maxy - miny
+    if okno_m is not None:
+        # stały rozmiar okna (dla zadanej skali) wokół środka trasy
+        cxr = srodek[0] if srodek else (min(xs) + max(xs)) / 2.0
+        cyr = srodek[1] if srodek else (min(ys) + max(ys)) / 2.0
+        szer_m, wys_m = okno_m
+        minx, maxx = cxr - szer_m / 2.0, cxr + szer_m / 2.0
+        miny, maxy = cyr - wys_m / 2.0, cyr + wys_m / 2.0
+    else:
+        minx, maxx = min(xs) - margines_m, max(xs) + margines_m
+        miny, maxy = min(ys) - margines_m, max(ys) + margines_m
+        szer_m = maxx - minx
+        wys_m = maxy - miny
 
     # transformer PL-2000 -> WGS84 (do próbkowania mozaiki Mercatora)
     from pyproj import Transformer
@@ -206,16 +220,18 @@ def generuj_podklad_jpg(
     out = moz[py, px].reshape(px_h, px_w, 3)
     obraz = Image.fromarray(out, "RGB")
 
-    # --- odcienie szarości: lekko rozjaśnione + lekki kontrast, żeby NAZWY
-    #     ULIC i NUMERY pozostały czytelne (jak w zab3.pdf), bez „prania" ---
-    szary = ImageOps.grayscale(obraz)
-    szary = ImageEnhance.Contrast(szary).enhance(KONTRAST)
-    szary = ImageEnhance.Brightness(szary).enhance(JASNOSC)
-    szary = szary.convert("RGB")  # JPG lubi RGB
+    if grayscale:
+        # odcienie szarości: lekko rozjaśnione + kontrast (podkład przebiegu)
+        wyj = ImageOps.grayscale(obraz)
+        wyj = ImageEnhance.Contrast(wyj).enhance(KONTRAST)
+        wyj = ImageEnhance.Brightness(wyj).enhance(JASNOSC)
+        wyj = wyj.convert("RGB")
+    else:
+        # kolorowy OSM (plan orientacyjny) — bez odbarwiania
+        wyj = obraz
 
     os.makedirs(os.path.dirname(os.path.abspath(sciezka_jpg)) or ".", exist_ok=True)
-    # wyższa jakość JPG -> ostrzejsze etykiety
-    szary.save(sciezka_jpg, "JPEG", quality=92)
+    wyj.save(sciezka_jpg, "JPEG", quality=92)
 
     return {
         "sciezka": sciezka_jpg,

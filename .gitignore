@@ -4,7 +4,10 @@ wynik*.dxf
 wynik*_podklad.jpg
 *_podklad.jpg
 *_opis.docx
+*_orientacja.dxf
 OT_wynik.docx
+orient*.dxf
+orient*.png
 .cache_osm/
 *.egg-info/
 .venv/

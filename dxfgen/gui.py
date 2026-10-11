@@ -89,15 +89,17 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
         postep = QtCore.Signal(str)
         skonczone = QtCore.Signal(bool, str)
 
-        def __init__(self, proj, wyjscie, podklad, opis=False):
+        def __init__(self, proj, wyjscie, podklad, opis=False, orientacja=False):
             super().__init__()
             self.proj = proj
             self.wyjscie = wyjscie
             self.podklad = podklad
             self.opis = opis
+            self.orientacja = orientacja
 
         def run(self):
             try:
+                import os
                 if self.podklad:
                     self.postep.emit("Pobieram podkład OSM i buduję JPG…")
                 sciezka, n = generuj_pelny_dxf(
@@ -105,11 +107,16 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
                 )
                 komunikat = f"OK: {sciezka} ({n} ark.)"
                 if self.opis:
-                    import os
                     from .opis import generuj_opis_docx
                     sop = os.path.splitext(self.wyjscie)[0] + "_opis.docx"
                     generuj_opis_docx(self.proj, sop)
                     komunikat += f"\nOpis: {sop}"
+                if self.orientacja:
+                    self.postep.emit("Buduję plan orientacyjny (kolorowy OSM)…")
+                    from .orientacja import generuj_plan_orientacyjny
+                    so = os.path.splitext(self.wyjscie)[0] + "_orientacja.dxf"
+                    _, _, etyk = generuj_plan_orientacyjny(self.proj, so)
+                    komunikat += f"\nPlan orientacyjny: {so} ({etyk})"
                 self.skonczone.emit(True, komunikat)
             except Exception as e:  # noqa: BLE001
                 self.skonczone.emit(False, f"Błąd: {e}")
@@ -423,6 +430,11 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             )
             self.cb_opis.setChecked(False)
             g3.addWidget(self.cb_opis, 2, 0, 1, 2)
+            self.cb_orient = QtWidgets.QCheckBox(
+                "Generuj plan orientacyjny (mapa poglądowa, A3 1:10 000/1:25 000)"
+            )
+            self.cb_orient.setChecked(False)
+            g3.addWidget(self.cb_orient, 3, 0, 1, 2)
             root.addWidget(gb3)
 
             # --- generowanie + log ---
@@ -590,7 +602,7 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             self.btn_generuj.setEnabled(False)
             self._wpis(f"Generuję: {out} …")
             self.watek = Watek(self.proj, out, self.cb_podklad.isChecked(),
-                               self.cb_opis.isChecked())
+                               self.cb_opis.isChecked(), self.cb_orient.isChecked())
             self.watek.postep.connect(self._wpis)
             self.watek.skonczone.connect(self._po_generowaniu)
             self.watek.start()

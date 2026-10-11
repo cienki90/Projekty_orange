@@ -24,6 +24,9 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
       zapisywany jako JPG obok DXF i osadzany jako IMAGE pod trasą).
 - [x] **Etap 4** — GUI (PySide6): wczytywanie plików, lista studni +
       wskazywanie zapasów (SZ) / muf (ZR), metryka na żywo, generowanie w tle.
+- [x] **Etap 7** — plan orientacyjny (mapa poglądowa): A3 w skali
+      1:10 000 lub 1:25 000, kolorowy podkład OSM, trasa jako czerwona linia,
+      układ i tabelka jak przebieg trasy (RYS. NR 1).
 - [x] **Etap 6** — opis techniczny (`.docx`) generowany z WT + rysunku
       (wzorzec `OT 339.docx`); projektant: inż. Tomasz Waśko (PDL/0137/PWOT/16).
 - [x] **Etap 5** — antykolizja opisów: WSZYSTKIE opisy model space (nazwy
@@ -118,6 +121,20 @@ bez argumentów, albo `python generuj.py`). Okno pozwala:
 > Gdy PySide6 nie jest zainstalowane, `generuj.py` bez argumentów użyje
 > uproszczonego okna wyboru plików (Tkinter). Flaga `--okno` wymusza to proste
 > okno nawet przy dostępnym PySide6.
+
+### Plan orientacyjny — mapa poglądowa (Etap 7)
+
+Osobny arkusz A3 (jak „Rys. nr 1 Mapa poglądowa" w opisie):
+
+- skala **1:10 000** lub **1:25 000** — dobierana automatycznie tak, by cała
+  trasa + margines zmieściły się w rzutni A3,
+- **kolorowy** podkład OSM (nie szary),
+- trasa jako gruba **czerwona** linia (warstwa `trasa orientacyjna`, ACI 1),
+- układ i tabelka jak przebieg trasy; Skala = `1:10 000`/`1:25 000`,
+  opis rysunku = `MAPA POGLĄDOWA`, RYS. NR = `1`.
+
+Uruchom: `plan.bat` (lub `generuj.bat --orientacja ...`, albo checkbox w GUI).
+Plik: `<wynik>_orientacja.dxf` + `<wynik>_orientacja_podklad.jpg` (trzymać razem).
 
 ### Opis techniczny — .docx (Etap 6)
 
