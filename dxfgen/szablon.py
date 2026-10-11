@@ -266,10 +266,8 @@ def _podmien_pole_tabelki(layout, proj: Projekt, ark: Arkusz,
             _dopasuj_opis_kabla(layout, e, d, dl_tras, dl_mont)
             continue
 
-        # --- nr rysunku (duży tekst "2.1") ---
-        if re.fullmatch(r"\d+(\.\d+)*", txt.strip()) and e.dxf.char_height >= 3.5:
-            e.text = nr_rys
-            continue
+        # UWAGA: numeru rysunku NIE ustawiamy tu — jest rysowany od zera w
+        # _zapewnij_pola_rysunku (jedno źródło prawdy, bez duplikatów).
 
         # --- operator / adres (Wykonawca, Inwestor) ---
         if "Wawtel" in txt or "sp. z o" in txt.lower():
@@ -335,20 +333,30 @@ def _numer_rysunku(numer_arkusza: int) -> str:
     return f"2.{numer_arkusza}"
 
 
-# pozycje pól tabelki ze wzorca zab2.dxf (prawy-dolny róg), [mm papieru]
-_POLE_SKALA = (344.25, 11.825, 1.8, "wymiarowanie", 5)        # (x,y,h,warstwa,attach)
-_POLE_OPIS = (348.824, 3.970, 1.8, "wymiarowanie", 5)
-_POLE_NR = (382.607, 9.049, 4.0, "Otworówka", 1)
-_OPIS_RYS = "\\pxi9;PRZEBIEG PROJEKTOWANEJ TRASY"
+# KOMÓRKI tabelki (prawy-dolny róg) ze wzorca zab2.dxf [mm papieru].
+# Pionowe linie siatki: 329 | 359 | 382 | 394 ; poziome: 0 | 8 | 15.2 | 16.
+# Każde pole: (środek_x, środek_y, wysokość_tekstu, szer_komórki, wys_komórki)
+#   Skala-wartość: komórka x[~346..359] y[8..16]  (po prawej od etykiety „Skala:")
+#   Opis rysunku:  komórka x[329..382] y[0..8]    (dolny, szeroki pas)
+#   Nr rysunku:    komórka x[382..394] y[0..16]   (wąska, duży numer)
+_CELA_SKALA = (352.5, 12.0, 1.8, 12.0, 7.0)
+_CELA_OPIS = (355.5, 4.0, 1.5, 52.0, 7.5)
+_CELA_NR = (388.0, 7.0, 4.0, 11.5, 14.0)
+_OPIS_RYS_TXT = "PRZEBIEG PROJEKTOWANEJ TRASY"
+ACI_CZARNY = 7  # czarny (na białym tle) — teksty tabelki muszą być czarne
 
 
 def _zapewnij_pola_rysunku(layout, nr_rys: str) -> None:
     """
     Gwarantuje obecność na arkuszu trzech pól tabelki, które na klonowanych
     arkuszach bywają gubione: Skala (1:1000), opis rysunku (PRZEBIEG
-    PROJEKTOWANEJ TRASY) oraz numer rysunku (2.x). Najpierw usuwa istniejące
-    kopie na arkuszu, potem rysuje je od zera (styl Arial), aby zawsze były
-    widoczne i spójne.
+    PROJEKTOWANEJ TRASY) oraz numer rysunku (2.x).
+
+    Wymagania:
+      - tekst CZARNY (ACI 7) — niezależnie od koloru warstwy,
+      - tekst MIEŚCI SIĘ w swojej komórce (dobór wysokości + ew. zawijanie),
+        bez wychodzenia poza obręb pola.
+    Najpierw usuwa istniejące kopie tych pól, potem rysuje od zera (Arial).
     """
     # usuń istniejące (na-arkuszowe) kopie tych pól
     do_usun = []
@@ -359,7 +367,10 @@ def _zapewnij_pola_rysunku(layout, nr_rys: str) -> None:
             continue
         if txt == "1:1000" or "PRZEBIEG PROJEKTOWANEJ TRASY" in txt:
             do_usun.append(e)
-        elif e.dxf.char_height >= 3.5 and _wyglada_jak_nr(txt):
+        # numer rysunku: duży tekst wyglądający jak „2", „2.1", „1", itp.,
+        # w okolicy komórki RYS. NR (x>378) — próg wysokości obniżony, bo kopie
+        # mogły zostać zmniejszone przy dopasowaniu do komórki
+        elif e.dxf.char_height >= 2.5 and _wyglada_jak_nr(txt) and x >= 378:
             do_usun.append(e)
     for e in do_usun:
         try:
@@ -367,18 +378,42 @@ def _zapewnij_pola_rysunku(layout, nr_rys: str) -> None:
         except Exception:
             pass
 
-    # narysuj od zera
-    def dodaj(tekst, param):
-        x, y, h, warstwa, attach = param
-        mt = layout.add_mtext(tekst, dxfattribs={"layer": warstwa,
-                                                 "style": dxf_model.STYL_ARIAL})
-        mt.dxf.char_height = h
-        mt.set_location((x, y), attachment_point=attach)
-        return mt
+    _dodaj_pole_komorki(layout, "1:1000", _CELA_SKALA)
+    _dodaj_pole_komorki(layout, _OPIS_RYS_TXT, _CELA_OPIS)
+    _dodaj_pole_komorki(layout, nr_rys, _CELA_NR)
 
-    dodaj("1:1000", _POLE_SKALA)
-    dodaj(_OPIS_RYS, _POLE_OPIS)
-    dodaj(nr_rys, _POLE_NR)
+
+def _dodaj_pole_komorki(layout, tekst: str, cela) -> None:
+    """
+    Rysuje tekst wyśrodkowany w komórce (cx, cy), CZARNY, z wysokością dobraną
+    tak, aby zmieścił się w szerokości i wysokości komórki (z marginesem).
+    Gdy przy danej wysokości tekst jest szerszy niż komórka — zmniejsza
+    wysokość; dopiero gdy minimalna wysokość nie wystarcza — pozwala zawinąć
+    (MTEXT.width = szerokość komórki).
+    """
+    cx, cy, h0, szer_cela, wys_cela = cela
+    pad = 1.0
+    maks_szer = szer_cela - 2 * pad
+    maks_wys = wys_cela - 2 * pad
+
+    # dobierz wysokość tak, by JEDNA linia zmieściła się w szerokości komórki
+    h = h0
+    for _ in range(12):
+        w = _szerokosc_linii(tekst, h) / ZAPAS_SZER  # realna szer. przy tej h
+        if w <= maks_szer and h <= maks_wys:
+            break
+        h *= 0.92
+        if h < 1.0:
+            h = 1.0
+            break
+
+    mt = layout.add_mtext(tekst, dxfattribs={"layer": "0",
+                                             "style": dxf_model.STYL_ARIAL,
+                                             "color": ACI_CZARNY})
+    mt.dxf.char_height = h
+    # szerokość kolumny = komórka (gdyby mimo wszystko trzeba było zawinąć)
+    mt.dxf.width = maks_szer
+    mt.set_location((cx, cy), attachment_point=5)  # MIDDLE_CENTER
 
 
 def _wyglada_jak_nr(txt: str) -> bool:
@@ -684,13 +719,40 @@ def _rysuj_ramke_zakonczenia(layout, proj: Projekt, ark: Arkusz, strona: str,
 
 
 def _trasa_papier(proj: Projekt, ark: Arkusz):
-    """Punkty trasy fragmentu arkusza w układzie papieru [mm]."""
+    """
+    Punkty CAŁEJ trasy (nie tylko węzłów tego arkusza) w układzie papieru [mm],
+    ograniczone do tych widocznych w oknie rzutni. Dzięki temu ramka zakończenia
+    omija też sąsiednie odcinki trasy wpadające w okno (zakład).
+    """
     PX, PY = _VP_CENTER_PAPER
+    VX0, VY0, VX1, VY1 = _VP_OBSZAR
     pts = []
-    for i in ark.studnie_idx:
-        s = proj.studnie[i]
-        pts.append((PX + (s.x - ark.center_x), PY + (s.y - ark.center_y)))
+    for s in proj.studnie:
+        px = PX + (s.x - ark.center_x)
+        py = PY + (s.y - ark.center_y)
+        if VX0 - 20 <= px <= VX1 + 20 and VY0 - 20 <= py <= VY1 + 20:
+            pts.append((px, py))
     return pts
+
+
+def _offset_papier(proj: Projekt, ark: Arkusz):
+    """
+    Punkty POMARAŃCZOWEJ linii „kabel projektowany" (offset trasy o 15 m) w
+    układzie papieru [mm] — żeby ramka zakończenia jej też nie zasłaniała.
+    """
+    PX, PY = _VP_CENTER_PAPER
+    VX0, VY0, VX1, VY1 = _VP_OBSZAR
+    pkty = [(s.x, s.y) for s in proj.studnie]
+    if len(pkty) < 2:
+        return []
+    off = dxf_model._offset_polilinii(pkty, dxf_model.TRASA_ODSUNIECIE)
+    out = []
+    for ox, oy in off:
+        px = PX + (ox - ark.center_x)
+        py = PY + (oy - ark.center_y)
+        if VX0 - 20 <= px <= VX1 + 20 and VY0 - 20 <= py <= VY1 + 20:
+            out.append((px, py))
+    return out
 
 
 def _koliduje_prost(box, other, margines=1.0) -> bool:
@@ -728,13 +790,17 @@ def _dobierz_pozycje_ramki(proj: Projekt, ark: Arkusz, strona: str,
     VX0, VY0, VX1, VY1 = _VP_OBSZAR
     MARG = 6.0
 
-    # przeszkody: tabelki + punkty/odcinki trasy
+    # przeszkody: tabelki + odcinki trasy + pomarańczowa linia offsetu
+    # (ramka zakończenia nie może zasłaniać ŻADNEGO elementu projektowanego)
     przeszkody = list(_ZASLONIETE)
     tp = _trasa_papier(proj, ark)
     for i in range(len(tp)):
         przeszkody.append((tp[i][0] - 2, tp[i][1] - 2, tp[i][0] + 2, tp[i][1] + 2))
         if i + 1 < len(tp):
             przeszkody.extend(_odcinek_prostokat(tp[i], tp[i + 1]))
+    op = _offset_papier(proj, ark)
+    for i in range(len(op) - 1):
+        przeszkody.extend(_odcinek_prostokat(op[i], op[i + 1]))
 
     # punkt docelowy (skrajna studnia) — chcemy ramkę blisko niego, ale nie na trasie
     tx, ty = cel if cel else (_VP_CENTER_PAPER)
