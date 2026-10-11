@@ -176,6 +176,27 @@ def _wypelnij_tabelke_orient(layout, proj: Projekt, etykieta_skali: str) -> None
             except Exception:
                 pass
 
+    # USUŃ tabelkę z prawego-GÓRNEGO rogu (opis kabla) — plan orientacyjny jej
+    # nie ma: kasujemy MTEXT „Proj. kabel ... dł. trasowa" oraz jego ramkę
+    # (zamknięta LWPOLYLINE przy prawej-górnej krawędzi rzutni, y≈269..285).
+    do_usun = []
+    for e in layout.query("MTEXT"):
+        if "Proj." in e.text and ("kabel" in e.text or "dł. trasowa" in e.text.lower()):
+            do_usun.append(e)
+    for e in layout.query("LWPOLYLINE"):
+        if not e.closed:
+            continue
+        pts = [(p[0], p[1]) for p in e.get_points("xy")]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        if xs and max(xs) >= 388 and min(ys) >= 255 and max(ys) >= 268:
+            do_usun.append(e)
+    for e in do_usun:
+        try:
+            layout.delete_entity(e)
+        except Exception:
+            pass
+
     # podmień pola tekstowe tabelki (operator/temat/projektant/data/nr kabla)
     from .szablon import (_zbuduj_operator, _zbuduj_temat)
     for e in layout.query("MTEXT"):
