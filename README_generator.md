@@ -102,7 +102,10 @@ bez argumentów, albo `python generuj.py`). Okno pozwala:
 - śledzić **metrykę na żywo** (dł. trasowa i montażowa aktualizują się po
   każdej zmianie zapasów),
 - włączyć/wyłączyć podkład OSM,
-- wygenerować DXF **w tle** (okno nie zawiesza się podczas pobierania podkładu).
+- wygenerować DXF **w tle** (okno nie zawiesza się podczas pobierania podkładu),
+- korzystać z **interaktywnego podglądu trasy** — rysunek całej trasy ze
+  studniami; **kliknięcie studni** zaznacza ją (synchronicznie z listą), a
+  markery pokazują, gdzie są już zapasy (kwadrat) i mufy (trójkąt).
 
 > Gdy PySide6 nie jest zainstalowane, `generuj.py` bez argumentów użyje
 > uproszczonego okna wyboru plików (Tkinter). Flaga `--okno` wymusza to proste

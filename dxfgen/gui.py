@@ -106,11 +106,127 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             except Exception as e:  # noqa: BLE001
                 self.skonczone.emit(False, f"Błąd: {e}")
 
+    class PodgladTrasy(QtWidgets.QWidget):
+        """
+        Interaktywny podgląd trasy: rysuje studnie i odcinki dopasowane do
+        rozmiaru widżetu, zaznacza studnie z zapasami (SZ=kwadrat) i mufami
+        (ZR=trójkąt). Kliknięcie studni emituje sygnał `wybrano(indeks)`.
+        """
+        wybrano = QtCore.Signal(int)
+
+        def __init__(self):
+            super().__init__()
+            self.proj = None
+            self.wybrany = -1
+            self._pkty = []     # [(sx, sy, idx)] ekranowe pozycje studni
+            self.setMinimumHeight(260)
+            self.setToolTip("Kliknij studnię, aby ją zaznaczyć; potem dodaj SZ/ZR.")
+
+        def ustaw_projekt(self, proj):
+            self.proj = proj
+            self.update()
+
+        def ustaw_wybrany(self, idx):
+            self.wybrany = idx
+            self.update()
+
+        def _przelicz(self):
+            self._pkty = []
+            if not self.proj or not self.proj.studnie:
+                return None
+            xs = [s.x for s in self.proj.studnie]
+            ys = [s.y for s in self.proj.studnie]
+            minx, maxx = min(xs), max(xs)
+            miny, maxy = min(ys), max(ys)
+            szer = max(maxx - minx, 1.0)
+            wys = max(maxy - miny, 1.0)
+            m = 30  # margines px
+            W = max(self.width() - 2 * m, 10)
+            H = max(self.height() - 2 * m, 10)
+            skala = min(W / szer, H / wys)
+            # wyśrodkowanie
+            ox = m + (W - szer * skala) / 2.0
+            oy = m + (H - wys * skala) / 2.0
+
+            def na_ekran(x, y):
+                sx = ox + (x - minx) * skala
+                sy = self.height() - (oy + (y - miny) * skala)  # odwróć Y
+                return sx, sy
+            return na_ekran
+
+        def paintEvent(self, event):  # noqa: N802
+            from PySide6 import QtGui, QtCore as _C
+            p = QtGui.QPainter(self)
+            p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            p.fillRect(self.rect(), QtGui.QColor("#ffffff"))
+            na_ekran = self._przelicz()
+            if na_ekran is None:
+                p.setPen(QtGui.QColor("#888"))
+                p.drawText(self.rect(), _C.Qt.AlignCenter,
+                           "Wczytaj projekt, aby zobaczyć podgląd trasy")
+                p.end()
+                return
+            s = self.proj.studnie
+            # odcinki trasy (czarne)
+            p.setPen(QtGui.QPen(QtGui.QColor("#111111"), 2))
+            for i in range(len(s) - 1):
+                x1, y1 = na_ekran(s[i].x, s[i].y)
+                x2, y2 = na_ekran(s[i + 1].x, s[i + 1].y)
+                p.drawLine(int(x1), int(y1), int(x2), int(y2))
+            # studnie + markery zapasów/muf
+            poz = {z.studnia for z in self.proj.zapasy}
+            sz_set = {z.studnia for z in self.proj.zapasy
+                      if z.kind == ReserveKind.ZAPAS}
+            zr_set = {z.studnia for z in self.proj.zapasy
+                      if z.kind == ReserveKind.MUFA}
+            self._pkty = []
+            for i, st in enumerate(s):
+                sx, sy = na_ekran(st.x, st.y)
+                self._pkty.append((sx, sy, i))
+                zazn = (i == self.wybrany)
+                # węzeł
+                p.setPen(QtGui.QPen(QtGui.QColor("#111"), 1))
+                p.setBrush(QtGui.QColor("#1565c0") if zazn else QtGui.QColor("#333"))
+                r = 6 if zazn else 4
+                p.drawEllipse(int(sx - r), int(sy - r), 2 * r, 2 * r)
+                # marker SZ (pomarańczowy kwadrat) / ZR (pomarańczowy trójkąt)
+                orange = QtGui.QColor("#ff7f0e")
+                p.setBrush(orange)
+                p.setPen(QtGui.QPen(orange, 1))
+                if st.nazwa in sz_set:
+                    p.drawRect(int(sx + 6), int(sy - 16), 10, 10)
+                if st.nazwa in zr_set:
+                    tri = QtGui.QPolygon([
+                        _C.QPoint(int(sx + 6), int(sy + 6)),
+                        _C.QPoint(int(sx + 18), int(sy + 6)),
+                        _C.QPoint(int(sx + 12), int(sy - 4)),
+                    ])
+                    p.drawPolygon(tri)
+                # numer studni przy zaznaczonej
+                if zazn:
+                    p.setPen(QtGui.QColor("#1565c0"))
+                    p.drawText(int(sx + 8), int(sy + 18), f"{st.nr}. {st.nazwa}")
+            p.end()
+
+        def mousePressEvent(self, event):  # noqa: N802
+            if not self._pkty:
+                return
+            mx, my = event.position().x(), event.position().y()
+            najbl, dmin = -1, 1e9
+            for sx, sy, idx in self._pkty:
+                d = (sx - mx) ** 2 + (sy - my) ** 2
+                if d < dmin:
+                    dmin, najbl = d, idx
+            if najbl >= 0 and dmin <= 20 ** 2:  # tolerancja kliknięcia
+                self.wybrany = najbl
+                self.update()
+                self.wybrano.emit(najbl)
+
     class Okno(QtWidgets.QMainWindow):
         def __init__(self):
             super().__init__()
             self.setWindowTitle("Generator DXF tras — Orange Polska")
-            self.resize(900, 640)
+            self.resize(1000, 820)
             self.proj: Projekt | None = None
             self.watek: Watek | None = None
 
@@ -177,6 +293,19 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             prawa.addWidget(b_usun)
             h.addLayout(prawa, 2)
             root.addWidget(gb)
+
+            # synchronizacja: lista studni <-> podgląd
+            self.lista_studni.currentRowChanged.connect(self._studnia_zmieniona)
+
+            # --- PODGLĄD TRASY (klikalny: wskazywanie studni do SZ/ZR) ---
+            gb_pod = QtWidgets.QGroupBox(
+                "Podgląd trasy — kliknij studnię, potem dodaj SZ/ZR powyżej"
+            )
+            vp = QtWidgets.QVBoxLayout(gb_pod)
+            self.podglad = PodgladTrasy()
+            self.podglad.wybrano.connect(self._podglad_klik)
+            vp.addWidget(self.podglad)
+            root.addWidget(gb_pod, 1)
 
             # --- metryka + opcje ---
             gb3 = QtWidgets.QGroupBox("3. Metryka i opcje")
@@ -248,6 +377,7 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
             self.lista_studni.clear()
             for s in self.proj.studnie:
                 self.lista_studni.addItem(f"{s.nr}. {s.nazwa}")
+            self.podglad.ustaw_projekt(self.proj)
             if self.proj.studnie:
                 self.lista_studni.setCurrentRow(0)
             self._odswiez_elementy()
@@ -288,6 +418,16 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
                 self._odswiez_elementy()
                 self._odswiez_metryke()
 
+        def _studnia_zmieniona(self, row):
+            # synchronizuj podgląd po wyborze na liście
+            if hasattr(self, "podglad"):
+                self.podglad.ustaw_wybrany(row)
+
+        def _podglad_klik(self, idx):
+            # klik na podglądzie -> ustaw wiersz na liście (bez pętli sygnałów)
+            if 0 <= idx < self.lista_studni.count():
+                self.lista_studni.setCurrentRow(idx)
+
         def _odswiez_elementy(self):
             self.lista_elem.clear()
             if not self.proj:
@@ -298,6 +438,8 @@ def uruchom_gui(domyslny_katalog: str = ".") -> int:
                         f"{z.etykieta}  @ {z.studnia}  ({z.dlugosc:.1f} m)")
                 else:
                     self.lista_elem.addItem(f"{z.etykieta}  @ {z.studnia}  (mufa)")
+            if hasattr(self, "podglad"):
+                self.podglad.update()  # odśwież markery SZ/ZR na podglądzie
 
         def _odswiez_metryke(self):
             if not self.proj:
