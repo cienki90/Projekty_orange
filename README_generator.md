@@ -22,9 +22,10 @@ w formacie zgodnym z wzorcem `zab2.dxf`.
       (z kontrolą mieszczenia tekstu).
 - [x] **Etap 3** — podkład OSM (raster w odcieniach szarości, georeferowany,
       zapisywany jako JPG obok DXF i osadzany jako IMAGE pod trasą).
-- [ ] **Etap 4** — GUI (PySide6): wczytywanie plików, lista + wskazywanie
-      zapasów/muf, podgląd, generowanie.
-- [ ] **Etap 5** — antykolizja opisów (przesuwanie + leadery).
+- [x] **Etap 4** — GUI (PySide6): wczytywanie plików, lista studni +
+      wskazywanie zapasów (SZ) / muf (ZR), metryka na żywo, generowanie w tle.
+- [ ] **Etap 5** — antykolizja opisów (przesuwanie + leadery) — ruszamy, gdy
+      na rysunku pojawiają się zapasy/mufy dodane w GUI.
 
 ### Opisy zakończeń A/B (ramki)
 
@@ -88,12 +89,32 @@ wydruku nie zginął żaden fragment projektu, środek rzutni jest dobierany tak
 by **żadna studnia ani trasa nie wpadła pod tabelkę** (użyteczne okno jest
 pomniejszone o pasy tabelek, a środek dociskany do obszaru widocznego).
 
+### GUI (Etap 4)
+
+Graficzny interfejs (PySide6) uruchamiasz przez **`gui.bat`** (lub `generuj.bat`
+bez argumentów, albo `python generuj.py`). Okno pozwala:
+
+- wskazać pliki wejściowe (współrzędne, WT) i miejsce zapisu DXF
+  (pola są wstępnie wypełniane auto-wykrytymi plikami z katalogu),
+- wczytać projekt i zobaczyć **listę studni**,
+- **wskazywać zapasy (SZ)** — z długością — oraz **mufy (ZR)** przy wybranych
+  studniach (dodawanie/usuwanie); numeracja SZ/ZR nadawana automatycznie,
+- śledzić **metrykę na żywo** (dł. trasowa i montażowa aktualizują się po
+  każdej zmianie zapasów),
+- włączyć/wyłączyć podkład OSM,
+- wygenerować DXF **w tle** (okno nie zawiesza się podczas pobierania podkładu).
+
+> Gdy PySide6 nie jest zainstalowane, `generuj.py` bez argumentów użyje
+> uproszczonego okna wyboru plików (Tkinter). Flaga `--okno` wymusza to proste
+> okno nawet przy dostępnym PySide6.
+
 ## Uruchamianie w Windows (pliki .bat)
 
 Najprościej — dwuklik kolejno:
 
 1. **`setup.bat`** — jednorazowa instalacja zależności (wykrywa Pythona, instaluje pakiety).
-2. **`generuj.bat`** — generuje DXF. Bez argumentów otwiera **okno wyboru plików**
+2. **`gui.bat`** — graficzny interfejs (wczytanie plików, wskazanie zapasów/muf,
+   generowanie). Alternatywnie **`generuj.bat`** — generuje DXF. Bez argumentów otwiera **GUI / okno wyboru plików**
    (wskazujesz współrzędne, WT i miejsce zapisu DXF; pola są wstępnie wypełniane
    auto-wykrytymi plikami z katalogu). Można też pominąć okno:
    ```

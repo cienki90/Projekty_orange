@@ -97,7 +97,14 @@ def main(argv: list[str]) -> int:
         print("Auto-wykryto pliki wejściowe.")
         return _generuj(auto_wspol, auto_wt, wyjscie, podklad)
 
-    # tryb domyślny: okno wyboru plików
+    # tryb domyślny: pełne GUI (PySide6). Gdy brak PySide6 — proste okno Tkinter.
+    if "--okno" not in flagi:  # --okno wymusza stary, lekki wybór plików
+        try:
+            from dxfgen.gui import uruchom_gui
+            return uruchom_gui(".")
+        except Exception as e:
+            print(f"[UWAGA] GUI PySide6 niedostępne ({e}). Używam prostego okna.")
+
     try:
         from dxfgen.okno_wyboru import wybierz_pliki
         wybor = wybierz_pliki(auto_wspol, auto_wt, "wynik.dxf")
