@@ -100,9 +100,15 @@ def zbierz_dane_opisu(proj: Projekt) -> dict:
     adr_b = d.zakonczenie_b_adres or ""
     relacja = f"{adr_a} - {adr_b}".strip(" -")
 
-    nry_muf = _numery_z_elementami(proj, ReserveKind.MUFA)
-    nry_zap = _numery_z_elementami(proj, ReserveKind.ZAPAS)
-    nry_mz = sorted(set(nry_muf) | set(nry_zap))
+    nry_muf = set(_numery_z_elementami(proj, ReserveKind.MUFA))
+    nry_zap = set(_numery_z_elementami(proj, ReserveKind.ZAPAS))
+    # studnie z MUFĄ i ZAPASEM jednocześnie / studnie z SAMYM zapasem
+    nry_mufa_i_zapas = sorted(nry_muf & nry_zap)
+    nry_tylko_zapas = sorted(nry_zap - nry_muf)
+    # liczności elementów (poprawne zliczanie — każdy element osobno)
+    n_muf = sum(1 for z in proj.zapasy if z.kind == ReserveKind.MUFA)
+    n_zap = sum(1 for z in proj.zapasy if z.kind == ReserveKind.ZAPAS)
+    ma_elementy = bool(proj.zapasy)
 
     nr_a = _numer_studni(proj, d.zakonczenie_a_studnia)
     nr_b = _numer_studni(proj, d.zakonczenie_b_studnia)
@@ -126,12 +132,16 @@ def zbierz_dane_opisu(proj: Projekt) -> dict:
         "nr_archiwalny": d.nr_archiwalny or _W["nr_archiwalny"],
         "data_opisu": d.data_opisu or _data_opisu(d) or _W["data_opisu"],
         "miesiac_rozp": d.miesiac_rozpoczecia or _W["miesiac_rozp"],
-        "nry_mufa_zapas": _lista_pl(nry_mz) if nry_mz else _W["nry_mufa_zapas"],
+        # studnie z mufą+zapasem oraz z samym zapasem (do pkt 3.1)
+        "nry_mufa_i_zapas": _lista_pl(nry_mufa_i_zapas),
+        "nry_tylko_zapas": _lista_pl(nry_tylko_zapas),
+        # (zgodność wstecz) — zbiorcza lista; gdy brak elementów użyj wzorca
+        "nry_mufa_zapas": (_lista_pl(sorted(nry_muf | nry_zap))
+                           if ma_elementy else _W["nry_mufa_zapas"]),
         "nry_hdpe": _lista_pl(hdpe) if hdpe else _W["nry_hdpe"],
-        "liczba_muf": str(sum(1 for z in proj.zapasy if z.kind == ReserveKind.MUFA)
-                          or _W["liczba_muf"]),
-        "liczba_zapasow": str(sum(1 for z in proj.zapasy if z.kind == ReserveKind.ZAPAS)
-                              or _W["liczba_zapasow"]),
+        # liczności: tylko gdy BRAK jakichkolwiek elementów używamy wzorca
+        "liczba_muf": str(n_muf) if ma_elementy else _W["liczba_muf"],
+        "liczba_zapasow": str(n_zap) if ma_elementy else _W["liczba_zapasow"],
         "projektant": d.projektant or _W["projektant"],
         "nr_uprawnien": d.nr_uprawnien or _W["nr_uprawnien"],
         "rok_budowy": _rok(d),
@@ -250,12 +260,14 @@ def _podmien(par_text: str, w: dict, b: dict) -> str | None:
         (w["nr_uprawnien"], b["nr_uprawnien"]),
         (w["miesiac_rozp"], b["miesiac_rozp"]),
         # frazy zależne od rysunku
-        (f"studniach nr {w['nry_mufa_zapas']}",
-         f"studniach nr {b['nry_mufa_zapas']}"),
+        # (zdanie „montaż mufy, stelażu zapasu…" obsługiwane jest ODDZIELNIE —
+        #  patrz _popraw_pkt_31 — bo wymaga rozbicia na studnie mufa+zapas vs
+        #  sam zapas i ewentualnego dodania drugiego akapitu)
         (f"studniach nr {w['nry_hdpe']} projektowane",
          f"studniach nr {b['nry_hdpe']} projektowane"),
-        (f"- {w['liczba_muf']} szt", f"- {b['liczba_muf']} szt"),
-        (f"-{w['liczba_zapasow']} m", f"-{b['liczba_zapasow']} m"),
+        # UWAGA: zestawienie materiałów (pkt 7) „Mufa - X szt" / „Stelaż zapasu
+        # - Y szt" NIE jest tu podmieniane — oba wiersze mają identyczny sufiks
+        # „- N szt", więc rozróżniamy je po etykiecie w _popraw_pkt_7.
         # średnica kabla: „Ø 7 mm" -> „Ø <srednica> mm" (różne warianty odstępu)
         (f"Ø {w['srednica']} mm", f"Ø {b['srednica']} mm"),
         (f"Ø{w['srednica']}mm", f"Ø{b['srednica']}mm"),
@@ -334,7 +346,13 @@ def generuj_opis_docx(proj: Projekt, sciezka_wyjscia: str,
             except Exception:
                 pass
 
-    # 4) WZÓR PRZYWIESZKI — podmiana osadzonego obrazka na wygenerowany z danymi WT
+    # 4) PKT 3.1 — rozbicie na studnie „mufa+zapas" i „sam zapas" (osobne zdania)
+    _popraw_pkt_31(doc, b)
+
+    # 4b) PKT 7 — poprawne liczności: Mufa = liczba_muf, Stelaż = liczba_zapasow
+    _popraw_pkt_7(doc, b)
+
+    # 5) WZÓR PRZYWIESZKI — podmiana osadzonego obrazka na wygenerowany z danymi WT
     try:
         _podmien_przywieszke(doc, b)
     except Exception:
@@ -342,6 +360,79 @@ def generuj_opis_docx(proj: Projekt, sciezka_wyjscia: str,
 
     doc.save(sciezka_wyjscia)
     return sciezka_wyjscia
+
+
+def _popraw_pkt_31(doc, b: dict) -> None:
+    """
+    Punkt 3.1 — rozbija informację o studniach na dwa zdania:
+      1) „W studniach nr <x,y,z> jest planowany montaż mufy, stelażu zapasu
+          wraz z zapasem kabla."  — studnie z MUFĄ i ZAPASEM jednocześnie,
+      2) „W studniach nr <a,b,c> jest planowany montaż stelażu zapasu wraz
+          z zapasem kabla."       — studnie z SAMYM zapasem (bez mufy).
+    Zdanie 2 jest dodawane jako NOWY akapit (ten sam styl) tuż po zdaniu 1.
+    Puste listy pomijamy (zdanie znika).
+    """
+    mz = b.get("nry_mufa_i_zapas", "").strip()
+    tz = b.get("nry_tylko_zapas", "").strip()
+
+    for par in doc.paragraphs:
+        t = par.text
+        if "montaż mufy" in t and "stelażu zapasu" in t and "studniach" in t:
+            if mz:
+                _ustaw_tekst_akapitu(
+                    par,
+                    f"W studniach nr {mz} jest planowany montaż mufy, stelażu "
+                    f"zapasu wraz z zapasem kabla.",
+                )
+            else:
+                # brak studni mufa+zapas — opróżnij zdanie wzorcowe
+                _ustaw_tekst_akapitu(par, "")
+            # dodaj drugie zdanie (sam zapas) jako nowy akapit tuż za bieżącym
+            if tz:
+                nowy = _wstaw_akapit_po(par)
+                _ustaw_tekst_akapitu(
+                    nowy,
+                    f"W studniach nr {tz} jest planowany montaż stelażu zapasu "
+                    f"wraz z zapasem kabla.",
+                )
+            break
+
+
+def _popraw_pkt_7(doc, b: dict) -> None:
+    """
+    Punkt 7 (zestawienie materiałów) — ustawia POPRAWNE liczności, rozróżniając
+    wiersze po etykiecie (bo oba kończą się „- N szt."):
+      „Mufa ... - <liczba_muf> szt."
+      „Stelaż zapasu ... - <liczba_zapasow> szt."
+    Zachowuje oryginalne tabulatory (wyrównanie) z akapitu wzorcowego.
+    """
+    import re
+    for par in doc.paragraphs:
+        t = par.text
+        low = t.lower().lstrip()
+        if "szt" not in t:
+            continue
+        if low.startswith("stelaż") or low.startswith("stelaz"):
+            nowy = re.sub(r"-\s*\d+\s*szt", f"- {b['liczba_zapasow']} szt", t)
+            if nowy != t:
+                _ustaw_tekst_akapitu(par, nowy)
+        elif low.startswith("mufa"):
+            nowy = re.sub(r"-\s*\d+\s*szt", f"- {b['liczba_muf']} szt", t)
+            if nowy != t:
+                _ustaw_tekst_akapitu(par, nowy)
+
+
+def _wstaw_akapit_po(par):
+    """Tworzy nowy akapit o TYM SAMYM stylu, wstawiony bezpośrednio po `par`."""
+    import copy
+    from docx.text.paragraph import Paragraph
+    nowy_p = copy.deepcopy(par._p)
+    # wyczyść runy w kopii (tekst ustawimy osobno)
+    for r in list(nowy_p.findall(
+            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r")):
+        nowy_p.remove(r)
+    par._p.addnext(nowy_p)
+    return Paragraph(nowy_p, par._parent)
 
 
 def _generuj_przywieszke_jpg(b: dict, sciezka: str, px_w: int, px_h: int) -> str:
